@@ -200,22 +200,20 @@
   }
 }
 
-@utility waffle-board {
-  background: linear-gradient(145deg, var(--waffle-batter), var(--waffle-batter-deep));
-  border: 0.7rem solid var(--waffle-crust);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-waffle), inset 0 0 0 2px oklch(0.6 0.09 60 / 0.4);
+@utility waffle-plate {
+  background: var(--plate);
+  border-radius: var(--radius-4xl);
+  box-shadow: var(--shadow-waffle);
 }
 
-@utility fill-pb {
-  fill: var(--peanut-butter);
-  stroke: var(--peanut-butter-deep);
-  stroke-width: 0.03;
+@utility waffle-outline {
+  fill: var(--waffle-batter);
+  stroke: var(--waffle-crust);
+  stroke-width: 0.42;
+  stroke-linejoin: round;
 }
 
-@utility fill-jam-piece {
-  fill: var(--jam);
-  stroke: var(--jam-deep);
+@utility waffle-piece {
   stroke-width: 0.03;
 }
 
@@ -224,3 +222,4 @@
   stroke: var(--waffle-batter-deep);
   stroke-width: 0.03;
 }
+
