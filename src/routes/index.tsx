@@ -358,6 +358,26 @@ function shortTime(seconds: number) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function countdown(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+function NextDaily() {
+  const [ms, setMs] = useState(() => msUntilMidnight());
+  useEffect(() => {
+    const id = window.setInterval(() => setMs(msUntilMidnight()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="font-display tabular-nums">{countdown(ms)}</span>
+  );
+}
+
+
 /* ---------- component ---------- */
 
 function WaffleBaffle() {
