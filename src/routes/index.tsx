@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
@@ -9,13 +9,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Waffle Baffle is a quick perception puzzle: study the waffle grid and guess whether peanut butter or strawberry jam covers more squares.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess whether peanut butter or strawberry jam covers more pieces. Square, honeycomb and triangle waffles.",
       },
       { property: "og:title", content: "Waffle Baffle — Peanut Butter or Jam?" },
       {
         property: "og:description",
         content:
-          "Study the waffle grid and guess which topping covers more squares. Play unlimited rounds at 10x10 up to 25x25.",
+          "Study the waffle and guess which topping covers more pieces. Square, honeycomb and triangle waffles, against the clock.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -25,14 +25,139 @@ export const Route = createFileRoute("/")({
 });
 
 type Topping = "pb" | "jam";
+type Shape = "square" | "honeycomb" | "triangle";
+type Cell = { points: string };
 type Round = { cells: Topping[]; winner: Topping; pb: number; jam: number };
 
-const SIZES = [10, 15, 20, 25] as const;
+const SHAPES: { id: Shape; label: string }[] = [
+  { id: "square", label: "Square" },
+  { id: "honeycomb", label: "Honeycomb" },
+  { id: "triangle", label: "Triangle" },
+];
 
-function makeRound(size: number): Round {
-  const total = size * size;
-  const lo = Math.ceil(total * 0.53);
-  const hi = Math.floor(total * 0.58);
+const LABEL: Record<Topping, string> = {
+  pb: "Peanut Butter",
+  jam: "Strawberry Jam",
+};
+
+/* ---------- geometry ---------- */
+
+const GAP = 0.06; // relative shrink of each piece so pieces read separately
+
+function shrink(pts: [number, number][], factor = 1 - GAP): [number, number][] {
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  return pts.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
+}
+
+function toPoints(pts: [number, number][]): string {
+  return pts.map(([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`).join(" ");
+}
+
+function squareCells(size: number): Cell[] {
+  const cells: Cell[] = [];
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      cells.push({
+        points: toPoints(
+          shrink([
+            [c, r],
+            [c + 1, r],
+            [c + 1, r + 1],
+            [c, r + 1],
+          ]),
+        ),
+      });
+    }
+  }
+  return cells;
+}
+
+/** Centered hexagonal number layout: radius 6 => 127 hexagons. */
+function honeycombCells(radius: number): Cell[] {
+  const s = 1; // hex circumradius
+  const cells: Cell[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    const r1 = Math.max(-radius, -q - radius);
+    const r2 = Math.min(radius, -q + radius);
+    for (let r = r1; r <= r2; r++) {
+      const cx = s * Math.sqrt(3) * (q + r / 2);
+      const cy = s * 1.5 * r;
+      const pts: [number, number][] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 180) * (60 * i - 30);
+        pts.push([cx + s * Math.cos(a), cy + s * Math.sin(a)]);
+      }
+      cells.push({ points: toPoints(shrink(pts)) });
+    }
+  }
+  return cells;
+}
+
+/** Big equilateral triangle: row i has 2i+1 small triangles (rows = 10 => 100). */
+function triangleCells(rows: number): Cell[] {
+  const s = 1;
+  const h = (Math.sqrt(3) / 2) * s;
+  const cells: Cell[] = [];
+  for (let r = 0; r < rows; r++) {
+    const y = r * h;
+    const x0 = -((r + 1) * s) / 2;
+    for (let k = 0; k < 2 * r + 1; k++) {
+      const j = Math.floor(k / 2);
+      const x = x0 + j * s;
+      const pts: [number, number][] =
+        k % 2 === 0
+          ? [
+              [x + s / 2, y],
+              [x + s, y + h],
+              [x, y + h],
+            ]
+          : [
+              [x + s / 2, y],
+              [x + 1.5 * s, y],
+              [x + s, y + h],
+            ];
+      cells.push({ points: toPoints(shrink(pts, 1 - GAP * 1.6)) });
+    }
+  }
+  return cells;
+}
+
+function useGeometry(shape: Shape) {
+  return useMemo(() => {
+    const cells =
+      shape === "square"
+        ? squareCells(10)
+        : shape === "honeycomb"
+          ? honeycombCells(6)
+          : triangleCells(10);
+
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const c of cells) {
+      for (const pair of c.points.split(" ")) {
+        const [x, y] = pair.split(",").map(Number) as [number, number];
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    const pad = 0.15;
+    return {
+      cells,
+      viewBox: `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`,
+    };
+  }, [shape]);
+}
+
+/* ---------- round generation ---------- */
+
+function makeRound(total: number): Round {
+  const lo = Math.ceil(total * 0.52);
+  const hi = Math.floor(total * 0.56);
   const majority = lo + Math.floor(Math.random() * (hi - lo + 1));
   const winner: Topping = Math.random() < 0.5 ? "pb" : "jam";
   const loser: Topping = winner === "pb" ? "jam" : "pb";
@@ -47,7 +172,6 @@ function makeRound(size: number): Round {
     cells[j] = tmp;
   }
 
-
   return {
     cells,
     winner,
@@ -56,28 +180,47 @@ function makeRound(size: number): Round {
   };
 }
 
-const LABEL: Record<Topping, string> = {
-  pb: "Peanut Butter",
-  jam: "Strawberry Jam",
-};
+function formatTime(ms: number) {
+  const s = Math.floor(ms / 1000);
+  const cs = Math.floor((ms % 1000) / 10);
+  return `${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}s`;
+}
+
+/* ---------- component ---------- */
 
 function WaffleBaffle() {
-  const [size, setSize] = useState<number>(10);
+  const [shape, setShape] = useState<Shape>("square");
+  const { cells, viewBox } = useGeometry(shape);
   const [round, setRound] = useState<Round | null>(null);
   const [guess, setGuess] = useState<Topping | null>(null);
   const [score, setScore] = useState({ played: 0, correct: 0 });
 
-  const deal = useCallback((s: number) => {
+  const startedAt = useRef<number>(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  const deal = useCallback((total: number) => {
     setGuess(null);
-    setRound(makeRound(s));
+    setRound(makeRound(total));
+    startedAt.current = Date.now();
+    setElapsed(0);
+    setRunning(true);
   }, []);
 
   useEffect(() => {
-    deal(size);
-  }, [size, deal]);
+    deal(cells.length);
+  }, [cells.length, shape, deal]);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 50);
+    return () => window.clearInterval(id);
+  }, [running]);
 
   const answer = (t: Topping) => {
     if (!round || guess) return;
+    setRunning(false);
+    setElapsed(Date.now() - startedAt.current);
     setGuess(t);
     setScore((s) => ({
       played: s.played + 1,
@@ -94,41 +237,55 @@ function WaffleBaffle() {
           Waffle Baffle
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-base text-muted-foreground">
-          One waffle, two toppings, one tiny difference. Which one covers more squares?
+          One waffle, two toppings, one tiny difference. Which one covers more pieces?
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
-        <span className="px-2 text-sm font-semibold text-muted-foreground">Waffle size</span>
-        {SIZES.map((s) => (
-          <Button
-            key={s}
-            size="sm"
-            variant={s === size ? "default" : "ghost"}
-            className="rounded-full font-bold"
-            onClick={() => setSize(s)}
-          >
-            {s}×{s}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
+          <span className="px-2 text-sm font-semibold text-muted-foreground">Waffle shape</span>
+          {SHAPES.map((s) => (
+            <Button
+              key={s.id}
+              size="sm"
+              variant={s.id === shape ? "default" : "ghost"}
+              className="rounded-full font-bold"
+              onClick={() => setShape(s.id)}
+            >
+              {s.label}
+            </Button>
+          ))}
+        </div>
+
+        <div className="rounded-full border border-border bg-card px-5 py-2 shadow-sm">
+          <span className="text-sm font-semibold text-muted-foreground">Time </span>
+          <span className="font-display text-lg font-bold tabular-nums text-foreground">
+            {formatTime(elapsed)}
+          </span>
+        </div>
       </div>
 
       <section className="w-full max-w-xl">
-        <div className="waffle-board p-2 sm:p-3">
-          <div
-            className="grid w-full gap-[2px] sm:gap-[3px]"
-            style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}
-            aria-label="Waffle grid"
+        <div className="waffle-board p-3 sm:p-4">
+          <svg
+            viewBox={viewBox}
+            className="h-auto w-full"
+            role="img"
+            aria-label={`${shape} waffle with ${cells.length} pieces`}
           >
-            {(round?.cells ?? Array.from({ length: size * size }, () => null)).map((c, i) => (
-              <div
-                key={i}
-                className={`waffle-cell aspect-square ${
-                  c === "pb" ? "cell-pb" : c === "jam" ? "cell-jam" : "bg-waffle-batter"
-                }`}
-              />
-            ))}
-          </div>
+            {cells.map((c, i) => {
+              const t = round?.cells[i];
+              return (
+                <polygon
+                  key={i}
+                  points={c.points}
+                  className={
+                    t === "pb" ? "fill-pb" : t === "jam" ? "fill-jam-piece" : "fill-batter"
+                  }
+                />
+              );
+            })}
+          </svg>
         </div>
       </section>
 
@@ -141,7 +298,7 @@ function WaffleBaffle() {
               onClick={() => answer("pb")}
             >
               Peanut Butter
-              <span className="text-xs font-semibold opacity-70">the tan squares</span>
+              <span className="text-xs font-semibold opacity-70">the tan pieces</span>
             </Button>
             <Button
               size="lg"
@@ -149,7 +306,7 @@ function WaffleBaffle() {
               onClick={() => answer("jam")}
             >
               Strawberry Jam
-              <span className="text-xs font-semibold opacity-80">the red squares</span>
+              <span className="text-xs font-semibold opacity-80">the red pieces</span>
             </Button>
           </div>
         ) : (
@@ -159,13 +316,17 @@ function WaffleBaffle() {
                 {isCorrect ? "Deliciously right!" : "Baffled!"}
               </h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                You picked {LABEL[guess]}. {LABEL[round.winner]} covered more of the waffle.
+                You picked {LABEL[guess]} in {formatTime(elapsed)}. {LABEL[round.winner]} covered
+                more of the waffle.
               </p>
               <div className="mt-4 flex justify-center gap-6 text-sm font-bold">
                 <span className="text-waffle-crust">Peanut Butter · {round.pb}</span>
                 <span className="text-jam">Strawberry Jam · {round.jam}</span>
               </div>
-              <Button className="mt-5 rounded-full px-8 font-bold" onClick={() => deal(size)}>
+              <Button
+                className="mt-5 rounded-full px-8 font-bold"
+                onClick={() => deal(cells.length)}
+              >
                 Serve another waffle
               </Button>
             </div>
