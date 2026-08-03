@@ -14,17 +14,17 @@ import { COLOR_GROUPS, type ColorGroup } from "@/lib/toppings";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Waffle Baffle — Which Topping Covers More?" },
+      { title: "Waffle Baffle: Which Topping Covers More?" },
       {
         name: "description",
         content:
           "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes.",
       },
-      { property: "og:title", content: "Waffle Baffle — Which Topping Covers More?" },
+      { property: "og:title", content: "Waffle Baffle: Which Topping Covers More?" },
       {
         property: "og:description",
         content:
-          "Study the waffle and guess which topping covers the most pieces. Three waffle shapes, normal and hard modes, daily puzzle or unlimited play.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

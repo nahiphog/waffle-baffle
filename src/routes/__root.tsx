@@ -77,13 +77,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Waffle Baffle" },
-      { name: "description", content: "A waffle-themed puzzle: guess whether peanut butter or strawberry jam covers more of the waffle." },
+      { title: "Waffle Baffle: Which Topping Covers More?" },
+      { name: "description", content: "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes." },
       { name: "author", content: "Waffle Baffle" },
-      { property: "og:title", content: "Waffle Baffle" },
-      { property: "og:description", content: "A waffle-themed puzzle: guess whether peanut butter or strawberry jam covers more of the waffle." },
+      { property: "og:title", content: "Waffle Baffle: Which Topping Covers More?" },
+      { property: "og:description", content: "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Waffle Baffle: Which Topping Covers More?" },
+      { name: "twitter:description", content: "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/15bef07a-8379-4e53-b729-fb5cb4220550" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/15bef07a-8379-4e53-b729-fb5cb4220550" },
     ],
     links: [
       {
