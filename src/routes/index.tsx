@@ -395,14 +395,30 @@ function WaffleBaffle() {
   const [results, setResults] = useState<Partial<Record<Shape, Result>>>({});
   const [unlimitedNo, setUnlimitedNo] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [dailyDone, setDailyDone] = useState<Partial<Record<Shape, Result>> | null>(null);
 
   const startedAt = useRef<number>(0);
+  const startedRef = useRef(false);
   const [elapsed, setElapsed] = useState(0);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
+    startedRef.current = started;
+  }, [started]);
+
+  useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  // daily lock, persisted in the browser
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`waffle-baffle-daily-${dayKey}`);
+      setDailyDone(raw ? (JSON.parse(raw) as Partial<Record<Shape, Result>>) : null);
+    } catch {
+      setDailyDone(null);
+    }
+  }, [dayKey]);
 
   const seedFor = useCallback(
     (s: Shape) =>
@@ -410,13 +426,17 @@ function WaffleBaffle() {
     [mode, dayKey, difficulty, unlimitedNo],
   );
 
-  // deal a fresh (unstarted) waffle whenever the board changes
+  // deal a fresh waffle whenever the board changes; keep the run going once started
   useEffect(() => {
     setGuess(null);
-    setStarted(false);
-    setRunning(false);
-    setElapsed(0);
     setCopied(false);
+    setElapsed(0);
+    if (startedRef.current) {
+      startedAt.current = Date.now();
+      setRunning(true);
+    } else {
+      setRunning(false);
+    }
     setRound(makeRound(cells.length, difficulty, mulberry32(hash(seedFor(shape)))));
   }, [cells.length, shape, difficulty, seedFor]);
 
@@ -424,7 +444,12 @@ function WaffleBaffle() {
   useEffect(() => {
     setResults({});
     setShapeIdx(0);
+    startedRef.current = false;
+    setStarted(false);
+    setRunning(false);
+    setElapsed(0);
   }, [mode, difficulty, dayKey]);
+
 
   useEffect(() => {
     if (!running) return;
