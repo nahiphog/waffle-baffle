@@ -167,7 +167,7 @@ function outlineFor(shape: Shape): [number, number][] {
     ];
   }
   if (shape === "honeycomb") {
-    const R = 6 * Math.sqrt(3) + 1.05;
+    const R = 6 * Math.sqrt(3) + 1.65;
     return Array.from({ length: 6 }, (_, i) => {
       const a = (Math.PI / 180) * 60 * i;
       return [R * Math.cos(a), R * Math.sin(a)] as [number, number];
