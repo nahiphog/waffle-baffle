@@ -599,127 +599,168 @@ function WaffleBaffle() {
         </div>
       </header>
 
-      <div className="rounded-full border border-border bg-card px-6 py-2 shadow-sm">
-        <span className="text-sm font-semibold text-muted-foreground">Time </span>
-        <span className="font-display text-lg font-bold tabular-nums text-foreground">
-          {formatTime(elapsed)}
-        </span>
-      </div>
-
-      <section className="relative w-full max-w-xl">
-        <div className="waffle-plate p-3 sm:p-4">
-          <svg
-            viewBox={viewBox}
-            className={`h-auto w-full transition-all duration-300 ${started ? "" : "blur-md"}`}
-            role="img"
-            aria-label={`${shape} waffle with ${cells.length} pieces`}
-          >
-            <polygon points={outline} className="waffle-outline" />
-            {cells.map((c, i) => {
-              const idx = round?.cells[i];
-              const entry = idx === undefined ? undefined : round?.entries[idx];
+      {locked ? (
+        <section className="w-full max-w-xl rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <h2 className="text-2xl font-extrabold text-foreground">
+            Today's daily waffle is done
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            You've already served up daily #{puzzleNo}. Come back for a fresh plate.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold text-foreground">
+            {SHAPES.filter((s) => dailyDone![s.id]).map((s) => {
+              const r = dailyDone![s.id]!;
               return (
-                <polygon
-                  key={i}
-                  points={c.points}
-                  className={entry ? "waffle-piece" : "fill-batter"}
-                  style={
-                    entry
-                      ? { fill: entry.group.fill, stroke: entry.group.stroke }
-                      : undefined
-                  }
-                />
+                <span key={s.id}>
+                  {s.label}: {shortTime(r.seconds)} {r.correct ? "✅" : "❌"}
+                </span>
               );
             })}
-          </svg>
-        </div>
-
-        {!started && (
-          <div className="absolute inset-0 flex items-center justify-center">
+          </div>
+          <p className="mt-5 text-sm font-semibold text-muted-foreground">
+            Next daily waffle in <NextDaily />
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+            <Button className="rounded-full px-8 font-bold" onClick={share}>
+              {copied ? "Copied!" : "Share"}
+            </Button>
             <Button
-              size="lg"
-              className="rounded-full px-8 text-base font-extrabold shadow-lg"
-              onClick={start}
+              variant="outline"
+              className="rounded-full px-8 font-bold"
+              onClick={() => setMode("unlimited")}
             >
-              Click here to start
+              Play unlimited
             </Button>
           </div>
-        )}
-      </section>
+        </section>
+      ) : (
+        <>
+          <div className="font-display text-2xl font-bold tabular-nums text-foreground">
+            {formatTime(elapsed)}
+          </div>
 
-      <section className="flex w-full max-w-xl flex-col items-center gap-4">
-        {started && guess === null ? (
-          <div
-            className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
-          >
-            {round?.entries.map((e, i) => (
-              <Button
-                key={i}
-                size="lg"
-                className="h-auto flex-col gap-1 rounded-2xl py-5 text-base font-extrabold hover:opacity-85"
-                style={{ backgroundColor: e.group.fill, color: e.group.on }}
-                onClick={() => answer(i)}
+          <section className="relative w-full max-w-xl">
+            <div className="waffle-plate p-3 sm:p-4">
+              <svg
+                viewBox={viewBox}
+                className={`h-auto w-full transition-all duration-300 ${started ? "" : "blur-[28px]"}`}
+                role="img"
+                aria-label={`${shape} waffle with ${cells.length} pieces`}
               >
-                {e.topping}
-                <span className="text-xs font-semibold opacity-75">
-                  the {e.group.label} pieces
-                </span>
-              </Button>
-            ))}
-          </div>
-        ) : null}
+                <polygon points={outline} className="waffle-outline" />
+                {cells.map((c, i) => {
+                  const idx = round?.cells[i];
+                  const entry = idx === undefined ? undefined : round?.entries[idx];
+                  return (
+                    <polygon
+                      key={i}
+                      points={c.points}
+                      className={entry ? "waffle-piece" : "fill-batter"}
+                      style={
+                        entry
+                          ? { fill: entry.group.fill, stroke: entry.group.stroke }
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+              </svg>
+            </div>
 
-        {guess !== null && round && (
-          <div className="w-full rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
-            <h2 className="text-2xl font-extrabold text-foreground">
-              {isCorrect ? "Deliciously right!" : "Baffled!"}
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
-              {round.entries[round.winner]!.topping} covered more of the waffle.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
-              {round.entries.map((e, i) => (
-                <span key={i} className="flex items-center gap-2">
-                  <span
-                    className="inline-block size-3 rounded-full"
-                    style={{ backgroundColor: e.group.fill }}
-                  />
-                  {e.topping} · {e.count}
-                </span>
-              ))}
-            </div>
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-              {!allDone ? (
-                <Button className="rounded-full px-8 font-bold" onClick={nextWaffle}>
-                  Go to the next waffle
+            {!started && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Button
+                  size="lg"
+                  className="rounded-full px-8 text-base font-extrabold shadow-lg"
+                  onClick={start}
+                >
+                  Click here to start
                 </Button>
-              ) : (
-                <>
-                  <Button className="rounded-full px-8 font-bold" onClick={share}>
-                    {copied ? "Copied!" : "Share"}
-                  </Button>
-                  {mode === "unlimited" && (
-                    <Button
-                      variant="outline"
-                      className="rounded-full px-8 font-bold"
-                      onClick={playAgain}
-                    >
-                      Play again
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-            {allDone && mode === "daily" && (
-              <p className="mt-4 text-sm font-semibold text-muted-foreground">
-                That's today's daily waffle — a fresh set is served at midnight. Switch to
-                Unlimited to keep playing.
-              </p>
+              </div>
             )}
-          </div>
-        )}
-      </section>
+          </section>
+
+          <section className="flex w-full max-w-xl flex-col items-center gap-4">
+            {started && guess === null ? (
+              <>
+                <p className="text-base font-bold text-foreground">
+                  Which topping is used more here?
+                </p>
+                <div
+                  className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+                >
+                  {round?.entries.map((e, i) => (
+                    <Button
+                      key={i}
+                      size="lg"
+                      className="h-auto flex-col gap-1 rounded-2xl py-5 text-base font-extrabold hover:opacity-85"
+                      style={{ backgroundColor: e.group.fill, color: e.group.on }}
+                      onClick={() => answer(i)}
+                    >
+                      {e.topping}
+                      <span className="text-xs font-semibold opacity-75">
+                        the {e.group.label} pieces
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {guess !== null && round && (
+              <div className="w-full rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+                <h2 className="text-2xl font-extrabold text-foreground">
+                  {isCorrect ? "Deliciously right!" : "Baffled!"}
+                </h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
+                  {round.entries[round.winner]!.topping} covered more of the waffle.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
+                  {round.entries.map((e, i) => (
+                    <span key={i} className="flex items-center gap-2">
+                      <span
+                        className="inline-block size-3 rounded-full"
+                        style={{ backgroundColor: e.group.fill }}
+                      />
+                      {e.topping} · {e.count}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                  {!allDone ? (
+                    <Button className="rounded-full px-8 font-bold" onClick={nextWaffle}>
+                      Go to the next waffle
+                    </Button>
+                  ) : (
+                    <>
+                      <Button className="rounded-full px-8 font-bold" onClick={share}>
+                        {copied ? "Copied!" : "Share"}
+                      </Button>
+                      {mode === "unlimited" && (
+                        <Button
+                          variant="outline"
+                          className="rounded-full px-8 font-bold"
+                          onClick={playAgain}
+                        >
+                          Play again
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+                {allDone && mode === "daily" && (
+                  <p className="mt-4 text-sm font-semibold text-muted-foreground">
+                    That's today's daily waffle — the next one is served in <NextDaily />.
+                    Switch to Unlimited to keep playing.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
     </main>
   );
 }
