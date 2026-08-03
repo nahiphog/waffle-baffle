@@ -1,6 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { COLOR_GROUPS, type ColorGroup } from "@/lib/toppings";
 
 export const Route = createFileRoute("/")({
@@ -10,13 +18,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, honeycomb and triangle waffles, daily and unlimited modes.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes.",
       },
       { property: "og:title", content: "Waffle Baffle — Which Topping Covers More?" },
       {
         property: "og:description",
         content:
-          "Study the waffle and guess which topping covers the most pieces. Three waffle shapes, easy and hard modes, daily puzzle or unlimited play.",
+          "Study the waffle and guess which topping covers the most pieces. Three waffle shapes, normal and hard modes, daily puzzle or unlimited play.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -25,17 +33,18 @@ export const Route = createFileRoute("/")({
   component: WaffleBaffle,
 });
 
-type Shape = "square" | "honeycomb" | "triangle";
+type Shape = "square" | "triangle" | "honeycomb";
 type Mode = "daily" | "unlimited";
 type Difficulty = 2 | 3;
 type Cell = { points: string };
 type Entry = { group: ColorGroup; topping: string; count: number };
 type Round = { cells: number[]; entries: Entry[]; winner: number };
+type Result = { seconds: number; correct: boolean };
 
 const SHAPES: { id: Shape; label: string }[] = [
   { id: "square", label: "Square" },
-  { id: "honeycomb", label: "Honeycomb" },
   { id: "triangle", label: "Triangle" },
+  { id: "honeycomb", label: "Honeycomb" },
 ];
 
 /* ---------- rng ---------- */
@@ -65,6 +74,13 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+const EPOCH = Date.UTC(2026, 0, 1);
+
+function dailyNumber(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  return Math.floor((Date.UTC(y!, m! - 1, d!) - EPOCH) / 86400000) + 1;
+}
+
 function msUntilMidnight() {
   const now = new Date();
   const next = new Date(now);
@@ -76,13 +92,15 @@ function msUntilMidnight() {
 
 const GAP = 0.06;
 
-function shrink(pts: [number, number][], factor = 1 - GAP): [number, number][] {
+type Pt = [number, number];
+
+function shrink(pts: Pt[], factor = 1 - GAP): Pt[] {
   const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
   const cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
   return pts.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
 }
 
-function toPoints(pts: [number, number][]): string {
+function toPoints(pts: Pt[]): string {
   return pts.map(([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`).join(" ");
 }
 
@@ -106,24 +124,67 @@ function squareCells(size: number): Cell[] {
 }
 
 /** Centered hexagonal number layout: radius 6 => 127 hexagons. */
-function honeycombCells(radius: number): Cell[] {
+function honeycombPolys(radius: number): Pt[][] {
   const s = 1;
-  const cells: Cell[] = [];
+  const polys: Pt[][] = [];
   for (let q = -radius; q <= radius; q++) {
     const r1 = Math.max(-radius, -q - radius);
     const r2 = Math.min(radius, -q + radius);
     for (let r = r1; r <= r2; r++) {
       const cx = s * Math.sqrt(3) * (q + r / 2);
       const cy = s * 1.5 * r;
-      const pts: [number, number][] = [];
+      const pts: Pt[] = [];
       for (let i = 0; i < 6; i++) {
         const a = (Math.PI / 180) * (60 * i - 30);
         pts.push([cx + s * Math.cos(a), cy + s * Math.sin(a)]);
       }
-      cells.push({ points: toPoints(shrink(pts)) });
+      polys.push(pts);
     }
   }
-  return cells;
+  return polys;
+}
+
+const key = (p: Pt) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
+
+/**
+ * Boundary of a union of edge-sharing polygons: keep edges used by exactly one
+ * cell and chain them into a single ring. Produces the zig-zag hex perimeter.
+ */
+function unionOutline(polys: Pt[][]): Pt[] {
+  const counts = new Map<string, number>();
+  const edges: { a: Pt; b: Pt; k: string }[] = [];
+  for (const poly of polys) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i]!;
+      const b = poly[(i + 1) % poly.length]!;
+      const ka = key(a);
+      const kb = key(b);
+      const k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+      edges.push({ a, b, k });
+    }
+  }
+  const border = edges.filter((e) => counts.get(e.k) === 1);
+  const next = new Map<string, Pt[]>();
+  for (const e of border) {
+    const list = next.get(key(e.a)) ?? [];
+    list.push(e.b);
+    next.set(key(e.a), list);
+  }
+  const start = border[0]!.a;
+  const ring: Pt[] = [start];
+  const used = new Set<string>();
+  let cur = start;
+  for (let i = 0; i < border.length; i++) {
+    const options = next.get(key(cur)) ?? [];
+    const step = options.find((p) => !used.has(`${key(cur)}>${key(p)}`));
+    if (!step) break;
+    used.add(`${key(cur)}>${key(step)}`);
+    if (key(step) === key(start)) break;
+    ring.push(step);
+    cur = step;
+  }
+  return ring;
 }
 
 /** Big equilateral triangle: row i has 2i+1 small triangles (rows = 10 => 100). */
@@ -137,7 +198,7 @@ function triangleCells(rows: number): Cell[] {
     for (let k = 0; k < 2 * r + 1; k++) {
       const j = Math.floor(k / 2);
       const x = x0 + j * s;
-      const pts: [number, number][] =
+      const pts: Pt[] =
         k % 2 === 0
           ? [
               [x + s / 2, y],
@@ -156,7 +217,7 @@ function triangleCells(rows: number): Cell[] {
 }
 
 /** Outline that encloses the waffle, following the true shape of each layout. */
-function outlineFor(shape: Shape): [number, number][] {
+function outlineFor(shape: Shape): Pt[] {
   if (shape === "square") {
     const p = 0.16;
     return [
@@ -167,14 +228,11 @@ function outlineFor(shape: Shape): [number, number][] {
     ];
   }
   if (shape === "honeycomb") {
-    const R = 6 * Math.sqrt(3) + 1.65;
-    return Array.from({ length: 6 }, (_, i) => {
-      const a = (Math.PI / 180) * 60 * i;
-      return [R * Math.cos(a), R * Math.sin(a)] as [number, number];
-    });
+    // zig-zag perimeter hugging every outer hexagon edge
+    return unionOutline(honeycombPolys(6)).map(([x, y]) => [x * 1.075, y * 1.075]);
   }
   const h = (Math.sqrt(3) / 2) * 10;
-  const pts: [number, number][] = [
+  const pts: Pt[] = [
     [0, 0],
     [5, h],
     [-5, h],
@@ -188,7 +246,7 @@ function useGeometry(shape: Shape) {
       shape === "square"
         ? squareCells(10)
         : shape === "honeycomb"
-          ? honeycombCells(6)
+          ? honeycombPolys(6).map((p) => ({ points: toPoints(shrink(p)) }))
           : triangleCells(10);
 
     const outline = outlineFor(shape);
@@ -221,7 +279,6 @@ function pickCounts(total: number, difficulty: Difficulty, rng: Rng): number[] {
     const majority = lo + Math.floor(rng() * (hi - lo + 1));
     return [majority, total - majority];
   }
-  // hard mode: three near-equal but distinct shares
   for (let guard = 0; guard < 5000; guard++) {
     let a = 0,
       b = 0,
@@ -285,22 +342,35 @@ function formatTime(ms: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function shortTime(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 /* ---------- component ---------- */
 
 function WaffleBaffle() {
   const [shape, setShape] = useState<Shape>("square");
   const [mode, setMode] = useState<Mode>("unlimited");
   const [difficulty, setDifficulty] = useState<Difficulty>(2);
+  const [dark, setDark] = useState(true);
   const { cells, outline, viewBox } = useGeometry(shape);
 
   const [round, setRound] = useState<Round | null>(null);
   const [guess, setGuess] = useState<number | null>(null);
   const [score, setScore] = useState({ played: 0, correct: 0 });
   const [dayKey, setDayKey] = useState(todayKey());
+  const [results, setResults] = useState<Partial<Record<Shape, Result>>>({});
+  const [unlimitedNo, setUnlimitedNo] = useState(1);
+  const [copied, setCopied] = useState(false);
 
   const startedAt = useRef<number>(0);
   const [elapsed, setElapsed] = useState(0);
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
 
   const deal = useCallback(
     (total: number, seed?: string) => {
@@ -310,6 +380,7 @@ function WaffleBaffle() {
       startedAt.current = Date.now();
       setElapsed(0);
       setRunning(true);
+      setCopied(false);
     },
     [difficulty],
   );
@@ -321,13 +392,17 @@ function WaffleBaffle() {
     );
   }, [cells.length, shape, mode, difficulty, dayKey, deal]);
 
+  // a change of mode / level / day starts a fresh scorecard
+  useEffect(() => {
+    setResults({});
+  }, [mode, difficulty, dayKey]);
+
   useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 250);
     return () => window.clearInterval(id);
   }, [running]);
 
-  // roll the daily puzzle over at midnight
   useEffect(() => {
     const id = window.setTimeout(() => setDayKey(todayKey()), msUntilMidnight() + 500);
     return () => window.clearTimeout(id);
@@ -335,27 +410,109 @@ function WaffleBaffle() {
 
   const answer = (i: number) => {
     if (!round || guess !== null) return;
+    const ms = Date.now() - startedAt.current;
+    const correct = i === round.winner;
     setRunning(false);
-    setElapsed(Date.now() - startedAt.current);
+    setElapsed(ms);
     setGuess(i);
-    setScore((s) => ({
-      played: s.played + 1,
-      correct: s.correct + (i === round.winner ? 1 : 0),
-    }));
+    setScore((s) => ({ played: s.played + 1, correct: s.correct + (correct ? 1 : 0) }));
+    setResults((r) => ({ ...r, [shape]: { seconds: Math.floor(ms / 1000), correct } }));
   };
 
   const isCorrect = guess !== null && round !== null && guess === round.winner;
+  const puzzleNo = mode === "daily" ? dailyNumber(dayKey) : unlimitedNo;
+
+  const shareText = useMemo(() => {
+    const lines = [
+      `Waffle Baffle #${puzzleNo} (${difficulty === 2 ? "Normal" : "Hard"})`,
+      ...SHAPES.filter((s) => results[s.id]).map((s) => {
+        const r = results[s.id]!;
+        return `${s.label}: ${shortTime(r.seconds)} ${r.correct ? "✅" : "❌"}`;
+      }),
+    ];
+    return lines.join("\n");
+  }, [puzzleNo, difficulty, results]);
+
+  const share = async () => {
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-7 px-4 py-10">
-      <header className="text-center">
-        <h1 className="text-5xl font-black tracking-tight text-foreground sm:text-6xl">
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-7 px-4 py-6">
+      <header className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+        <div className="flex items-center gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="rounded-full font-bold">
+                How to play
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>How to play</DialogTitle>
+                <DialogDescription>
+                  Study the waffle and pick the topping that covers the most pieces. The
+                  shares are close, so trust your eyes — and the clock is running.
+                </DialogDescription>
+              </DialogHeader>
+            </DialogContent>
+          </Dialog>
+
+          <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1">
+            {(["daily", "unlimited"] as Mode[]).map((m) => (
+              <Button
+                key={m}
+                size="sm"
+                variant={m === mode ? "default" : "ghost"}
+                className="rounded-full font-bold capitalize"
+                onClick={() => setMode(m)}
+              >
+                {m}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <h1 className="order-first w-full text-center text-3xl font-black tracking-tight text-foreground sm:order-none sm:w-auto sm:text-4xl">
           Waffle Baffle
         </h1>
-        <p className="mx-auto mt-3 max-w-lg text-base text-muted-foreground">
-          One waffle, a few toppings, one tiny difference. Which one covers more pieces?
-        </p>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1">
+            <span className="px-2 text-xs font-semibold text-muted-foreground">Level</span>
+            {([2, 3] as Difficulty[]).map((d) => (
+              <Button
+                key={d}
+                size="sm"
+                variant={d === difficulty ? "default" : "ghost"}
+                className="rounded-full font-bold"
+                onClick={() => setDifficulty(d)}
+              >
+                {d === 2 ? "Normal" : "Hard"}
+              </Button>
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full font-bold"
+            aria-label="Toggle dark mode"
+            onClick={() => setDark((v) => !v)}
+          >
+            {dark ? "☀️ Light" : "🌙 Dark"}
+          </Button>
+        </div>
       </header>
+
+      <p className="-mt-3 max-w-lg text-center text-base text-muted-foreground">
+        One waffle, a few toppings, one tiny difference. Which one covers more pieces?
+      </p>
 
       <div className="flex flex-wrap items-center justify-center gap-3">
         <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
@@ -372,43 +529,13 @@ function WaffleBaffle() {
             </Button>
           ))}
         </div>
+      </div>
 
-        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
-          <span className="px-2 text-sm font-semibold text-muted-foreground">Mode</span>
-          {(["daily", "unlimited"] as Mode[]).map((m) => (
-            <Button
-              key={m}
-              size="sm"
-              variant={m === mode ? "default" : "ghost"}
-              className="rounded-full font-bold capitalize"
-              onClick={() => setMode(m)}
-            >
-              {m}
-            </Button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
-          <span className="px-2 text-sm font-semibold text-muted-foreground">Level</span>
-          {([2, 3] as Difficulty[]).map((d) => (
-            <Button
-              key={d}
-              size="sm"
-              variant={d === difficulty ? "default" : "ghost"}
-              className="rounded-full font-bold"
-              onClick={() => setDifficulty(d)}
-            >
-              {d === 2 ? "Normal" : "Hard"}
-            </Button>
-          ))}
-        </div>
-
-        <div className="rounded-full border border-border bg-card px-5 py-2 shadow-sm">
-          <span className="text-sm font-semibold text-muted-foreground">Time </span>
-          <span className="font-display text-lg font-bold tabular-nums text-foreground">
-            {formatTime(elapsed)}
-          </span>
-        </div>
+      <div className="rounded-full border border-border bg-card px-6 py-2 shadow-sm">
+        <span className="text-sm font-semibold text-muted-foreground">Time </span>
+        <span className="font-display text-lg font-bold tabular-nums text-foreground">
+          {formatTime(elapsed)}
+        </span>
       </div>
 
       <section className="w-full max-w-xl">
@@ -481,17 +608,31 @@ function WaffleBaffle() {
                   </span>
                 ))}
               </div>
-              {mode === "unlimited" ? (
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <Button
-                  className="mt-5 rounded-full px-8 font-bold"
-                  onClick={() => deal(cells.length)}
+                  variant="outline"
+                  className="rounded-full px-8 font-bold"
+                  onClick={share}
                 >
-                  Serve another waffle
+                  {copied ? "Copied!" : "Share"}
                 </Button>
-              ) : (
-                <p className="mt-5 text-sm font-semibold text-muted-foreground">
-                  That's today's daily waffle — a fresh one is served at midnight. Switch to
-                  Unlimited to keep playing.
+                {mode === "unlimited" && (
+                  <Button
+                    className="rounded-full px-8 font-bold"
+                    onClick={() => {
+                      setUnlimitedNo((n) => n + 1);
+                      setResults({});
+                      deal(cells.length);
+                    }}
+                  >
+                    Serve another waffle
+                  </Button>
+                )}
+              </div>
+              {mode === "daily" && (
+                <p className="mt-4 text-sm font-semibold text-muted-foreground">
+                  That's today's daily waffle — a fresh one is served at midnight. Try the
+                  other shapes, or switch to Unlimited to keep playing.
                 </p>
               )}
             </div>
