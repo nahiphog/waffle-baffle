@@ -1,21 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { COLOR_GROUPS, type ColorGroup } from "@/lib/toppings";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Waffle Baffle — Peanut Butter or Jam?" },
+      { title: "Waffle Baffle — Which Topping Covers More?" },
       {
         name: "description",
         content:
-          "Waffle Baffle is a quick perception puzzle: study the waffle and guess whether peanut butter or strawberry jam covers more pieces. Square, honeycomb and triangle waffles.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, honeycomb and triangle waffles, daily and unlimited modes.",
       },
-      { property: "og:title", content: "Waffle Baffle — Peanut Butter or Jam?" },
+      { property: "og:title", content: "Waffle Baffle — Which Topping Covers More?" },
       {
         property: "og:description",
         content:
-          "Study the waffle and guess which topping covers more pieces. Square, honeycomb and triangle waffles, against the clock.",
+          "Study the waffle and guess which topping covers the most pieces. Three waffle shapes, easy and hard modes, daily puzzle or unlimited play.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -24,10 +25,12 @@ export const Route = createFileRoute("/")({
   component: WaffleBaffle,
 });
 
-type Topping = "pb" | "jam";
 type Shape = "square" | "honeycomb" | "triangle";
+type Mode = "daily" | "unlimited";
+type Difficulty = 2 | 3;
 type Cell = { points: string };
-type Round = { cells: Topping[]; winner: Topping; pb: number; jam: number };
+type Entry = { group: ColorGroup; topping: string; count: number };
+type Round = { cells: number[]; entries: Entry[]; winner: number };
 
 const SHAPES: { id: Shape; label: string }[] = [
   { id: "square", label: "Square" },
@@ -35,14 +38,43 @@ const SHAPES: { id: Shape; label: string }[] = [
   { id: "triangle", label: "Triangle" },
 ];
 
-const LABEL: Record<Topping, string> = {
-  pb: "Peanut Butter",
-  jam: "Strawberry Jam",
-};
+/* ---------- rng ---------- */
+
+type Rng = () => number;
+
+function mulberry32(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hash(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function msUntilMidnight() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  return next.getTime() - now.getTime();
+}
 
 /* ---------- geometry ---------- */
 
-const GAP = 0.06; // relative shrink of each piece so pieces read separately
+const GAP = 0.06;
 
 function shrink(pts: [number, number][], factor = 1 - GAP): [number, number][] {
   const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
@@ -75,7 +107,7 @@ function squareCells(size: number): Cell[] {
 
 /** Centered hexagonal number layout: radius 6 => 127 hexagons. */
 function honeycombCells(radius: number): Cell[] {
-  const s = 1; // hex circumradius
+  const s = 1;
   const cells: Cell[] = [];
   for (let q = -radius; q <= radius; q++) {
     const r1 = Math.max(-radius, -q - radius);
@@ -123,6 +155,33 @@ function triangleCells(rows: number): Cell[] {
   return cells;
 }
 
+/** Outline that encloses the waffle, following the true shape of each layout. */
+function outlineFor(shape: Shape): [number, number][] {
+  if (shape === "square") {
+    const p = 0.16;
+    return [
+      [-p, -p],
+      [10 + p, -p],
+      [10 + p, 10 + p],
+      [-p, 10 + p],
+    ];
+  }
+  if (shape === "honeycomb") {
+    const R = 6 * Math.sqrt(3) + 1.65;
+    return Array.from({ length: 6 }, (_, i) => {
+      const a = (Math.PI / 180) * 60 * i;
+      return [R * Math.cos(a), R * Math.sin(a)] as [number, number];
+    });
+  }
+  const h = (Math.sqrt(3) / 2) * 10;
+  const pts: [number, number][] = [
+    [0, 0],
+    [5, h],
+    [-5, h],
+  ];
+  return shrink(pts, 1.06);
+}
+
 function useGeometry(shape: Shape) {
   return useMemo(() => {
     const cells =
@@ -132,22 +191,22 @@ function useGeometry(shape: Shape) {
           ? honeycombCells(6)
           : triangleCells(10);
 
+    const outline = outlineFor(shape);
+
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
-    for (const c of cells) {
-      for (const pair of c.points.split(" ")) {
-        const [x, y] = pair.split(",").map(Number) as [number, number];
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y);
-      }
+    for (const [x, y] of outline) {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
     }
-    const pad = 0.15;
+    const pad = 0.6;
     return {
       cells,
+      outline: toPoints(outline),
       viewBox: `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`,
     };
   }, [shape]);
@@ -155,95 +214,152 @@ function useGeometry(shape: Shape) {
 
 /* ---------- round generation ---------- */
 
-function makeRound(total: number): Round {
-  const lo = Math.ceil(total * 0.52);
-  const hi = Math.floor(total * 0.56);
-  const majority = lo + Math.floor(Math.random() * (hi - lo + 1));
-  const winner: Topping = Math.random() < 0.5 ? "pb" : "jam";
-  const loser: Topping = winner === "pb" ? "jam" : "pb";
+function pickCounts(total: number, difficulty: Difficulty, rng: Rng): number[] {
+  if (difficulty === 2) {
+    const lo = Math.ceil(total * 0.52);
+    const hi = Math.floor(total * 0.56);
+    const majority = lo + Math.floor(rng() * (hi - lo + 1));
+    return [majority, total - majority];
+  }
+  // hard mode: three near-equal but distinct shares
+  for (let guard = 0; guard < 5000; guard++) {
+    let a = 0,
+      b = 0,
+      c = 0;
+    for (let inner = 0; inner < 5000; inner++) {
+      a = 0.27 + rng() * 0.11;
+      b = 0.27 + rng() * 0.11;
+      c = 1 - a - b;
+      if (Math.max(a, b, c) - Math.min(a, b, c) <= 0.07) break;
+    }
+    const counts = [Math.round(a * total), Math.round(b * total), Math.round(c * total)];
+    const sum = counts[0]! + counts[1]! + counts[2]!;
+    if (sum !== total) continue;
+    if (new Set(counts).size !== 3) continue;
+    if (Math.max(...counts) - Math.min(...counts) > 4) return counts;
+  }
+  const base = Math.floor(total / 3);
+  return [base + 2, base, total - (base + 2) - base];
+}
 
-  const cells: Topping[] = Array.from({ length: total }, (_, i) =>
-    i < majority ? winner : loser,
-  );
+function makeRound(total: number, difficulty: Difficulty, rng: Rng): Round {
+  const pool = [...COLOR_GROUPS];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = pool[i]!;
+    pool[i] = pool[j]!;
+    pool[j] = tmp;
+  }
+  const groups = pool.slice(0, difficulty);
+  const counts = pickCounts(total, difficulty, rng);
+
+  const entries: Entry[] = groups.map((group, i) => ({
+    group,
+    topping: group.toppings[Math.floor(rng() * group.toppings.length)]!,
+    count: counts[i]!,
+  }));
+
+  const cells: number[] = [];
+  entries.forEach((e, i) => {
+    for (let k = 0; k < e.count; k++) cells.push(i);
+  });
   for (let i = cells.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     const tmp = cells[i]!;
     cells[i] = cells[j]!;
     cells[j] = tmp;
   }
 
-  return {
-    cells,
-    winner,
-    pb: winner === "pb" ? majority : total - majority,
-    jam: winner === "jam" ? majority : total - majority,
-  };
+  let winner = 0;
+  entries.forEach((e, i) => {
+    if (e.count > entries[winner]!.count) winner = i;
+  });
+
+  return { cells, entries, winner };
 }
 
 function formatTime(ms: number) {
-  const s = Math.floor(ms / 1000);
-  const cs = Math.floor((ms % 1000) / 10);
-  return `${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}s`;
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 /* ---------- component ---------- */
 
 function WaffleBaffle() {
   const [shape, setShape] = useState<Shape>("square");
-  const { cells, viewBox } = useGeometry(shape);
+  const [mode, setMode] = useState<Mode>("unlimited");
+  const [difficulty, setDifficulty] = useState<Difficulty>(2);
+  const { cells, outline, viewBox } = useGeometry(shape);
+
   const [round, setRound] = useState<Round | null>(null);
-  const [guess, setGuess] = useState<Topping | null>(null);
+  const [guess, setGuess] = useState<number | null>(null);
   const [score, setScore] = useState({ played: 0, correct: 0 });
+  const [dayKey, setDayKey] = useState(todayKey());
 
   const startedAt = useRef<number>(0);
   const [elapsed, setElapsed] = useState(0);
   const [running, setRunning] = useState(false);
 
-  const deal = useCallback((total: number) => {
-    setGuess(null);
-    setRound(makeRound(total));
-    startedAt.current = Date.now();
-    setElapsed(0);
-    setRunning(true);
-  }, []);
+  const deal = useCallback(
+    (total: number, seed?: string) => {
+      const rng = seed ? mulberry32(hash(seed)) : Math.random;
+      setGuess(null);
+      setRound(makeRound(total, difficulty, rng));
+      startedAt.current = Date.now();
+      setElapsed(0);
+      setRunning(true);
+    },
+    [difficulty],
+  );
 
   useEffect(() => {
-    deal(cells.length);
-  }, [cells.length, shape, deal]);
+    deal(
+      cells.length,
+      mode === "daily" ? `${dayKey}|${shape}|${difficulty}` : undefined,
+    );
+  }, [cells.length, shape, mode, difficulty, dayKey, deal]);
 
   useEffect(() => {
     if (!running) return;
-    const id = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 50);
+    const id = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 250);
     return () => window.clearInterval(id);
   }, [running]);
 
-  const answer = (t: Topping) => {
-    if (!round || guess) return;
+  // roll the daily puzzle over at midnight
+  useEffect(() => {
+    const id = window.setTimeout(() => setDayKey(todayKey()), msUntilMidnight() + 500);
+    return () => window.clearTimeout(id);
+  }, [dayKey]);
+
+  const answer = (i: number) => {
+    if (!round || guess !== null) return;
     setRunning(false);
     setElapsed(Date.now() - startedAt.current);
-    setGuess(t);
+    setGuess(i);
     setScore((s) => ({
       played: s.played + 1,
-      correct: s.correct + (t === round.winner ? 1 : 0),
+      correct: s.correct + (i === round.winner ? 1 : 0),
     }));
   };
 
   const isCorrect = guess !== null && round !== null && guess === round.winner;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-8 px-4 py-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-7 px-4 py-10">
       <header className="text-center">
         <h1 className="text-5xl font-black tracking-tight text-foreground sm:text-6xl">
           Waffle Baffle
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-base text-muted-foreground">
-          One waffle, two toppings, one tiny difference. Which one covers more pieces?
+          One waffle, a few toppings, one tiny difference. Which one covers more pieces?
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center justify-center gap-4">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
-          <span className="px-2 text-sm font-semibold text-muted-foreground">Waffle shape</span>
+          <span className="px-2 text-sm font-semibold text-muted-foreground">Shape</span>
           {SHAPES.map((s) => (
             <Button
               key={s.id}
@@ -257,6 +373,36 @@ function WaffleBaffle() {
           ))}
         </div>
 
+        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
+          <span className="px-2 text-sm font-semibold text-muted-foreground">Mode</span>
+          {(["daily", "unlimited"] as Mode[]).map((m) => (
+            <Button
+              key={m}
+              size="sm"
+              variant={m === mode ? "default" : "ghost"}
+              className="rounded-full font-bold capitalize"
+              onClick={() => setMode(m)}
+            >
+              {m}
+            </Button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
+          <span className="px-2 text-sm font-semibold text-muted-foreground">Level</span>
+          {([2, 3] as Difficulty[]).map((d) => (
+            <Button
+              key={d}
+              size="sm"
+              variant={d === difficulty ? "default" : "ghost"}
+              className="rounded-full font-bold"
+              onClick={() => setDifficulty(d)}
+            >
+              {d === 2 ? "Normal" : "Hard"}
+            </Button>
+          ))}
+        </div>
+
         <div className="rounded-full border border-border bg-card px-5 py-2 shadow-sm">
           <span className="text-sm font-semibold text-muted-foreground">Time </span>
           <span className="font-display text-lg font-bold tabular-nums text-foreground">
@@ -266,21 +412,26 @@ function WaffleBaffle() {
       </div>
 
       <section className="w-full max-w-xl">
-        <div className="waffle-board p-3 sm:p-4">
+        <div className="waffle-plate p-3 sm:p-4">
           <svg
             viewBox={viewBox}
             className="h-auto w-full"
             role="img"
             aria-label={`${shape} waffle with ${cells.length} pieces`}
           >
+            <polygon points={outline} className="waffle-outline" />
             {cells.map((c, i) => {
-              const t = round?.cells[i];
+              const idx = round?.cells[i];
+              const entry = idx === undefined ? undefined : round?.entries[idx];
               return (
                 <polygon
                   key={i}
                   points={c.points}
-                  className={
-                    t === "pb" ? "fill-pb" : t === "jam" ? "fill-jam-piece" : "fill-batter"
+                  className={entry ? "waffle-piece" : "fill-batter"}
+                  style={
+                    entry
+                      ? { fill: entry.group.fill, stroke: entry.group.stroke }
+                      : undefined
                   }
                 />
               );
@@ -291,23 +442,23 @@ function WaffleBaffle() {
 
       <section className="flex w-full max-w-xl flex-col items-center gap-4">
         {guess === null ? (
-          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            <Button
-              size="lg"
-              className="h-auto flex-col gap-1 rounded-2xl bg-peanut-butter py-5 text-lg font-extrabold text-waffle-crust hover:bg-peanut-butter/85"
-              onClick={() => answer("pb")}
-            >
-              Peanut Butter
-              <span className="text-xs font-semibold opacity-70">the tan pieces</span>
-            </Button>
-            <Button
-              size="lg"
-              className="h-auto flex-col gap-1 rounded-2xl bg-jam py-5 text-lg font-extrabold text-primary-foreground hover:bg-jam/85"
-              onClick={() => answer("jam")}
-            >
-              Strawberry Jam
-              <span className="text-xs font-semibold opacity-80">the red pieces</span>
-            </Button>
+          <div
+            className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+          >
+            {round?.entries.map((e, i) => (
+              <Button
+                key={i}
+                size="lg"
+                className="h-auto flex-col gap-1 rounded-2xl py-5 text-base font-extrabold hover:opacity-85"
+                style={{ backgroundColor: e.group.fill, color: e.group.on }}
+                onClick={() => answer(i)}
+              >
+                {e.topping}
+                <span className="text-xs font-semibold opacity-75">
+                  the {e.group.label} pieces
+                </span>
+              </Button>
+            ))}
           </div>
         ) : (
           round && (
@@ -316,19 +467,33 @@ function WaffleBaffle() {
                 {isCorrect ? "Deliciously right!" : "Baffled!"}
               </h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                You picked {LABEL[guess]} in {formatTime(elapsed)}. {LABEL[round.winner]} covered
-                more of the waffle.
+                You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
+                {round.entries[round.winner]!.topping} covered more of the waffle.
               </p>
-              <div className="mt-4 flex justify-center gap-6 text-sm font-bold">
-                <span className="text-waffle-crust">Peanut Butter · {round.pb}</span>
-                <span className="text-jam">Strawberry Jam · {round.jam}</span>
+              <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
+                {round.entries.map((e, i) => (
+                  <span key={i} className="flex items-center gap-2">
+                    <span
+                      className="inline-block size-3 rounded-full"
+                      style={{ backgroundColor: e.group.fill }}
+                    />
+                    {e.topping} · {e.count}
+                  </span>
+                ))}
               </div>
-              <Button
-                className="mt-5 rounded-full px-8 font-bold"
-                onClick={() => deal(cells.length)}
-              >
-                Serve another waffle
-              </Button>
+              {mode === "unlimited" ? (
+                <Button
+                  className="mt-5 rounded-full px-8 font-bold"
+                  onClick={() => deal(cells.length)}
+                >
+                  Serve another waffle
+                </Button>
+              ) : (
+                <p className="mt-5 text-sm font-semibold text-muted-foreground">
+                  That's today's daily waffle — a fresh one is served at midnight. Switch to
+                  Unlimited to keep playing.
+                </p>
+              )}
             </div>
           )
         )}
