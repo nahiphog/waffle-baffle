@@ -74,12 +74,23 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-const EPOCH = Date.UTC(2026, 0, 1);
+const EPOCH = Date.UTC(2026, 7, 3);
 
 function dailyNumber(key: string) {
   const [y, m, d] = key.split("-").map(Number);
   return Math.floor((Date.UTC(y!, m! - 1, d!) - EPOCH) / 86400000) + 1;
 }
+
+function prettyDate(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 
 function msUntilMidnight() {
   const now = new Date();
