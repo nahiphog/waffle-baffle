@@ -143,3 +143,82 @@
     color: var(--color-foreground);
   }
 }
+
+/* ---------- Waffle Baffle design system ---------- */
+:root {
+  --background: oklch(0.96 0.03 85);
+  --foreground: oklch(0.28 0.05 55);
+  --card: oklch(0.99 0.015 90);
+  --card-foreground: oklch(0.28 0.05 55);
+  --popover: oklch(0.99 0.015 90);
+  --popover-foreground: oklch(0.28 0.05 55);
+  --primary: oklch(0.55 0.13 55);
+  --primary-foreground: oklch(0.98 0.02 90);
+  --secondary: oklch(0.92 0.04 82);
+  --secondary-foreground: oklch(0.34 0.06 55);
+  --muted: oklch(0.93 0.03 85);
+  --muted-foreground: oklch(0.5 0.04 65);
+  --accent: oklch(0.88 0.07 75);
+  --accent-foreground: oklch(0.3 0.06 55);
+  --border: oklch(0.86 0.04 78);
+  --input: oklch(0.86 0.04 78);
+  --ring: oklch(0.6 0.13 55);
+  --radius: 0.9rem;
+
+  --waffle-batter: oklch(0.83 0.09 78);
+  --waffle-batter-deep: oklch(0.68 0.1 65);
+  --waffle-crust: oklch(0.5 0.09 55);
+  --peanut-butter: oklch(0.76 0.11 72);
+  --peanut-butter-deep: oklch(0.62 0.11 66);
+  --jam: oklch(0.52 0.19 22);
+  --jam-deep: oklch(0.4 0.16 20);
+  --plate: oklch(0.99 0.01 95);
+  --shadow-waffle: 0 18px 40px -18px oklch(0.35 0.09 55 / 0.55);
+}
+
+@theme inline {
+  --color-waffle-batter: var(--waffle-batter);
+  --color-waffle-batter-deep: var(--waffle-batter-deep);
+  --color-waffle-crust: var(--waffle-crust);
+  --color-peanut-butter: var(--peanut-butter);
+  --color-jam: var(--jam);
+  --color-plate: var(--plate);
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-image:
+      radial-gradient(circle at 12% 8%, oklch(0.92 0.06 80 / 0.9), transparent 45%),
+      radial-gradient(circle at 88% 92%, oklch(0.9 0.05 40 / 0.55), transparent 50%);
+    background-attachment: fixed;
+  }
+  h1, h2, .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+@utility waffle-board {
+  background: linear-gradient(145deg, var(--waffle-batter), var(--waffle-batter-deep));
+  border: 0.7rem solid var(--waffle-crust);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-waffle), inset 0 0 0 2px oklch(0.6 0.09 60 / 0.4);
+}
+
+@utility waffle-cell {
+  border-radius: 3px;
+  box-shadow:
+    inset 2px 2px 3px oklch(1 0 0 / 0.35),
+    inset -2px -2px 4px oklch(0.35 0.08 50 / 0.45);
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+@utility cell-pb {
+  background: radial-gradient(circle at 30% 25%, oklch(0.85 0.1 80), var(--peanut-butter) 60%, var(--peanut-butter-deep));
+}
+
+@utility cell-jam {
+  background: radial-gradient(circle at 30% 25%, oklch(0.62 0.2 25), var(--jam) 60%, var(--jam-deep));
+}
