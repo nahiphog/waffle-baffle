@@ -200,6 +200,33 @@
 
 }
 
+
+.dark {
+  --background: oklch(0.19 0.02 60);
+  --foreground: oklch(0.94 0.02 85);
+  --card: oklch(0.24 0.025 60);
+  --card-foreground: oklch(0.94 0.02 85);
+  --popover: oklch(0.24 0.025 60);
+  --popover-foreground: oklch(0.94 0.02 85);
+  --primary: oklch(0.72 0.13 65);
+  --primary-foreground: oklch(0.2 0.04 55);
+  --secondary: oklch(0.3 0.03 60);
+  --secondary-foreground: oklch(0.94 0.02 85);
+  --muted: oklch(0.28 0.025 60);
+  --muted-foreground: oklch(0.75 0.03 75);
+  --accent: oklch(0.34 0.05 65);
+  --accent-foreground: oklch(0.95 0.02 85);
+  --border: oklch(0.36 0.03 62);
+  --input: oklch(0.36 0.03 62);
+  --ring: oklch(0.72 0.13 65);
+
+  --waffle-batter: oklch(0.6 0.09 70);
+  --waffle-batter-deep: oklch(0.48 0.08 62);
+  --waffle-crust: oklch(0.36 0.07 52);
+  --plate: oklch(0.26 0.03 60);
+  --shadow-waffle: 0 18px 40px -18px oklch(0 0 0 / 0.7);
+}
+
 @theme inline {
   --color-waffle-batter: var(--waffle-batter);
   --color-waffle-batter-deep: var(--waffle-batter-deep);
@@ -222,6 +249,12 @@
   h1, h2, .font-display {
     font-family: var(--font-display);
   }
+}
+
+.dark body {
+  background-image:
+    radial-gradient(circle at 12% 8%, oklch(0.32 0.05 70 / 0.9), transparent 45%),
+    radial-gradient(circle at 88% 92%, oklch(0.3 0.05 30 / 0.7), transparent 50%);
 }
 
 @utility waffle-plate {
