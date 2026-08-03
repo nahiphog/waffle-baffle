@@ -74,12 +74,23 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-const EPOCH = Date.UTC(2026, 0, 1);
+const EPOCH = Date.UTC(2026, 7, 3);
 
 function dailyNumber(key: string) {
   const [y, m, d] = key.split("-").map(Number);
   return Math.floor((Date.UTC(y!, m! - 1, d!) - EPOCH) / 86400000) + 1;
 }
+
+function prettyDate(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 
 function msUntilMidnight() {
   const now = new Date();
@@ -350,7 +361,8 @@ function shortTime(seconds: number) {
 /* ---------- component ---------- */
 
 function WaffleBaffle() {
-  const [shape, setShape] = useState<Shape>("square");
+  const [shapeIdx, setShapeIdx] = useState(0);
+  const shape = SHAPES[shapeIdx]!.id;
   const [mode, setMode] = useState<Mode>("unlimited");
   const [difficulty, setDifficulty] = useState<Difficulty>(2);
   const [dark, setDark] = useState(true);
@@ -358,7 +370,7 @@ function WaffleBaffle() {
 
   const [round, setRound] = useState<Round | null>(null);
   const [guess, setGuess] = useState<number | null>(null);
-  const [score, setScore] = useState({ played: 0, correct: 0 });
+  const [started, setStarted] = useState(false);
   const [dayKey, setDayKey] = useState(todayKey());
   const [results, setResults] = useState<Partial<Record<Shape, Result>>>({});
   const [unlimitedNo, setUnlimitedNo] = useState(1);
@@ -372,29 +384,26 @@ function WaffleBaffle() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
-  const deal = useCallback(
-    (total: number, seed?: string) => {
-      const rng = seed ? mulberry32(hash(seed)) : Math.random;
-      setGuess(null);
-      setRound(makeRound(total, difficulty, rng));
-      startedAt.current = Date.now();
-      setElapsed(0);
-      setRunning(true);
-      setCopied(false);
-    },
-    [difficulty],
+  const seedFor = useCallback(
+    (s: Shape) =>
+      mode === "daily" ? `${dayKey}|${s}|${difficulty}` : `u${unlimitedNo}|${s}|${difficulty}|${dayKey}`,
+    [mode, dayKey, difficulty, unlimitedNo],
   );
 
+  // deal a fresh (unstarted) waffle whenever the board changes
   useEffect(() => {
-    deal(
-      cells.length,
-      mode === "daily" ? `${dayKey}|${shape}|${difficulty}` : undefined,
-    );
-  }, [cells.length, shape, mode, difficulty, dayKey, deal]);
+    setGuess(null);
+    setStarted(false);
+    setRunning(false);
+    setElapsed(0);
+    setCopied(false);
+    setRound(makeRound(cells.length, difficulty, mulberry32(hash(seedFor(shape)))));
+  }, [cells.length, shape, difficulty, seedFor]);
 
   // a change of mode / level / day starts a fresh scorecard
   useEffect(() => {
     setResults({});
+    setShapeIdx(0);
   }, [mode, difficulty, dayKey]);
 
   useEffect(() => {
@@ -408,27 +417,39 @@ function WaffleBaffle() {
     return () => window.clearTimeout(id);
   }, [dayKey]);
 
+  const start = () => {
+    startedAt.current = Date.now();
+    setElapsed(0);
+    setRunning(true);
+    setStarted(true);
+  };
+
   const answer = (i: number) => {
-    if (!round || guess !== null) return;
+    if (!round || guess !== null || !started) return;
     const ms = Date.now() - startedAt.current;
     const correct = i === round.winner;
     setRunning(false);
     setElapsed(ms);
     setGuess(i);
-    setScore((s) => ({ played: s.played + 1, correct: s.correct + (correct ? 1 : 0) }));
     setResults((r) => ({ ...r, [shape]: { seconds: Math.floor(ms / 1000), correct } }));
   };
 
   const isCorrect = guess !== null && round !== null && guess === round.winner;
   const puzzleNo = mode === "daily" ? dailyNumber(dayKey) : unlimitedNo;
+  const isLast = shapeIdx === SHAPES.length - 1;
+  const allDone = SHAPES.every((s) => results[s.id]);
 
   const shareText = useMemo(() => {
+    const link =
+      typeof window === "undefined" ? "" : `${window.location.origin}${window.location.pathname}`;
     const lines = [
       `Waffle Baffle #${puzzleNo} (${difficulty === 2 ? "Normal" : "Hard"})`,
       ...SHAPES.filter((s) => results[s.id]).map((s) => {
         const r = results[s.id]!;
         return `${s.label}: ${shortTime(r.seconds)} ${r.correct ? "✅" : "❌"}`;
       }),
+      "",
+      link,
     ];
     return lines.join("\n");
   }, [puzzleNo, difficulty, results]);
@@ -443,8 +464,18 @@ function WaffleBaffle() {
     }
   };
 
+  const nextWaffle = () => {
+    if (!isLast) setShapeIdx((i) => i + 1);
+  };
+
+  const playAgain = () => {
+    setUnlimitedNo((n) => n + 1);
+    setResults({});
+    setShapeIdx(0);
+  };
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-7 px-4 py-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-6 px-4 py-6">
       <header className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex items-center gap-2">
           <Dialog>
@@ -464,72 +495,48 @@ function WaffleBaffle() {
             </DialogContent>
           </Dialog>
 
-          <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1">
-            {(["daily", "unlimited"] as Mode[]).map((m) => (
-              <Button
-                key={m}
-                size="sm"
-                variant={m === mode ? "default" : "ghost"}
-                className="rounded-full font-bold capitalize"
-                onClick={() => setMode(m)}
-              >
-                {m}
-              </Button>
-            ))}
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full text-lg leading-none font-bold"
+            aria-label={mode === "daily" ? "Daily mode" : "Unlimited mode"}
+            title={mode === "daily" ? "Daily mode" : "Unlimited mode"}
+            onClick={() => setMode((m) => (m === "daily" ? "unlimited" : "daily"))}
+          >
+            {mode === "daily" ? "🗓" : "∞"}
+          </Button>
         </div>
 
-        <h1 className="order-first w-full text-center text-3xl font-black tracking-tight text-foreground sm:order-none sm:w-auto sm:text-4xl">
-          Waffle Baffle
-        </h1>
+        <div className="order-first w-full text-center sm:order-none sm:w-auto">
+          <h1 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
+            Waffle Baffle
+          </h1>
+          <p className="mt-1 text-sm font-semibold text-muted-foreground">
+            {mode === "daily" ? `#${puzzleNo}: ${prettyDate(dayKey)}` : "Unlimited mode"}
+          </p>
+        </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1">
-            <span className="px-2 text-xs font-semibold text-muted-foreground">Level</span>
-            {([2, 3] as Difficulty[]).map((d) => (
-              <Button
-                key={d}
-                size="sm"
-                variant={d === difficulty ? "default" : "ghost"}
-                className="rounded-full font-bold"
-                onClick={() => setDifficulty(d)}
-              >
-                {d === 2 ? "Normal" : "Hard"}
-              </Button>
-            ))}
-          </div>
           <Button
             variant="outline"
             size="sm"
             className="rounded-full font-bold"
+            aria-label={`Level: ${difficulty === 2 ? "Normal" : "Hard"}`}
+            onClick={() => setDifficulty((d) => (d === 2 ? 3 : 2))}
+          >
+            {difficulty === 2 ? "Normal" : "Hard"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full text-lg leading-none font-bold"
             aria-label="Toggle dark mode"
             onClick={() => setDark((v) => !v)}
           >
-            {dark ? "☀️ Light" : "🌙 Dark"}
+            {dark ? "☼" : "☾"}
           </Button>
         </div>
       </header>
-
-      <p className="-mt-3 max-w-lg text-center text-base text-muted-foreground">
-        One waffle, a few toppings, one tiny difference. Which one covers more pieces?
-      </p>
-
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-2 py-2 shadow-sm">
-          <span className="px-2 text-sm font-semibold text-muted-foreground">Shape</span>
-          {SHAPES.map((s) => (
-            <Button
-              key={s.id}
-              size="sm"
-              variant={s.id === shape ? "default" : "ghost"}
-              className="rounded-full font-bold"
-              onClick={() => setShape(s.id)}
-            >
-              {s.label}
-            </Button>
-          ))}
-        </div>
-      </div>
 
       <div className="rounded-full border border-border bg-card px-6 py-2 shadow-sm">
         <span className="text-sm font-semibold text-muted-foreground">Time </span>
@@ -538,11 +545,11 @@ function WaffleBaffle() {
         </span>
       </div>
 
-      <section className="w-full max-w-xl">
+      <section className="relative w-full max-w-xl">
         <div className="waffle-plate p-3 sm:p-4">
           <svg
             viewBox={viewBox}
-            className="h-auto w-full"
+            className={`h-auto w-full transition-all duration-300 ${started ? "" : "blur-md"}`}
             role="img"
             aria-label={`${shape} waffle with ${cells.length} pieces`}
           >
@@ -565,10 +572,22 @@ function WaffleBaffle() {
             })}
           </svg>
         </div>
+
+        {!started && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Button
+              size="lg"
+              className="rounded-full px-8 text-base font-extrabold shadow-lg"
+              onClick={start}
+            >
+              Click here to start
+            </Button>
+          </div>
+        )}
       </section>
 
       <section className="flex w-full max-w-xl flex-col items-center gap-4">
-        {guess === null ? (
+        {started && guess === null ? (
           <div
             className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
           >
@@ -587,62 +606,60 @@ function WaffleBaffle() {
               </Button>
             ))}
           </div>
-        ) : (
-          round && (
-            <div className="w-full rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
-              <h2 className="text-2xl font-extrabold text-foreground">
-                {isCorrect ? "Deliciously right!" : "Baffled!"}
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
-                {round.entries[round.winner]!.topping} covered more of the waffle.
-              </p>
-              <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
-                {round.entries.map((e, i) => (
-                  <span key={i} className="flex items-center gap-2">
-                    <span
-                      className="inline-block size-3 rounded-full"
-                      style={{ backgroundColor: e.group.fill }}
-                    />
-                    {e.topping} · {e.count}
-                  </span>
-                ))}
-              </div>
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-                <Button
-                  variant="outline"
-                  className="rounded-full px-8 font-bold"
-                  onClick={share}
-                >
-                  {copied ? "Copied!" : "Share"}
+        ) : null}
+
+        {guess !== null && round && (
+          <div className="w-full rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+            <h2 className="text-2xl font-extrabold text-foreground">
+              {isCorrect ? "Deliciously right!" : "Baffled!"}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
+              {round.entries[round.winner]!.topping} covered more of the waffle.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
+              {round.entries.map((e, i) => (
+                <span key={i} className="flex items-center gap-2">
+                  <span
+                    className="inline-block size-3 rounded-full"
+                    style={{ backgroundColor: e.group.fill }}
+                  />
+                  {e.topping} · {e.count}
+                </span>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              {!allDone ? (
+                <Button className="rounded-full px-8 font-bold" onClick={nextWaffle}>
+                  Go to the next waffle
                 </Button>
-                {mode === "unlimited" && (
-                  <Button
-                    className="rounded-full px-8 font-bold"
-                    onClick={() => {
-                      setUnlimitedNo((n) => n + 1);
-                      setResults({});
-                      deal(cells.length);
-                    }}
-                  >
-                    Serve another waffle
+              ) : (
+                <>
+                  <Button className="rounded-full px-8 font-bold" onClick={share}>
+                    {copied ? "Copied!" : "Share"}
                   </Button>
-                )}
-              </div>
-              {mode === "daily" && (
-                <p className="mt-4 text-sm font-semibold text-muted-foreground">
-                  That's today's daily waffle — a fresh one is served at midnight. Try the
-                  other shapes, or switch to Unlimited to keep playing.
-                </p>
+                  {mode === "unlimited" && (
+                    <Button
+                      variant="outline"
+                      className="rounded-full px-8 font-bold"
+                      onClick={playAgain}
+                    >
+                      Play again
+                    </Button>
+                  )}
+                </>
               )}
             </div>
-          )
+            {allDone && mode === "daily" && (
+              <p className="mt-4 text-sm font-semibold text-muted-foreground">
+                That's today's daily waffle — a fresh set is served at midnight. Switch to
+                Unlimited to keep playing.
+              </p>
+            )}
+          </div>
         )}
-
-        <p className="text-sm font-semibold text-muted-foreground">
-          Score: {score.correct} / {score.played}
-        </p>
       </section>
     </main>
   );
 }
+
