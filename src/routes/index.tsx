@@ -528,7 +528,12 @@ function WaffleBaffle() {
     setUnlimitedNo((n) => n + 1);
     setResults({});
     setShapeIdx(0);
+    startedRef.current = false;
+    setStarted(false);
+    setRunning(false);
+    setElapsed(0);
   };
+
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-6 px-4 py-6">
