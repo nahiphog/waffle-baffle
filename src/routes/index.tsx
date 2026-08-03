@@ -476,9 +476,18 @@ function WaffleBaffle() {
     setRunning(false);
     setElapsed(ms);
     setGuess(i);
-    setResults((r) => ({ ...r, [shape]: { seconds: Math.floor(ms / 1000), correct } }));
+    const next = { ...results, [shape]: { seconds: Math.floor(ms / 1000), correct } };
+    setResults(next);
+    if (mode === "daily" && SHAPES.every((s) => next[s.id])) {
+      try {
+        window.localStorage.setItem(`waffle-baffle-daily-${dayKey}`, JSON.stringify(next));
+      } catch {
+        /* storage unavailable */
+      }
+    }
   };
 
+  const locked = mode === "daily" && dailyDone !== null;
   const isCorrect = guess !== null && round !== null && guess === round.winner;
   const puzzleNo = mode === "daily" ? dailyNumber(dayKey) : unlimitedNo;
   const isLast = shapeIdx === SHAPES.length - 1;
@@ -487,17 +496,19 @@ function WaffleBaffle() {
   const shareText = useMemo(() => {
     const link =
       typeof window === "undefined" ? "" : `${window.location.origin}${window.location.pathname}`;
+    const scores = locked ? dailyDone! : results;
     const lines = [
       `Waffle Baffle #${puzzleNo} (${difficulty === 2 ? "Normal" : "Hard"})`,
-      ...SHAPES.filter((s) => results[s.id]).map((s) => {
-        const r = results[s.id]!;
+      ...SHAPES.filter((s) => scores[s.id]).map((s) => {
+        const r = scores[s.id]!;
         return `${s.label}: ${shortTime(r.seconds)} ${r.correct ? "✅" : "❌"}`;
       }),
       "",
       link,
     ];
     return lines.join("\n");
-  }, [puzzleNo, difficulty, results]);
+  }, [puzzleNo, difficulty, results, locked, dailyDone]);
+
 
   const share = async () => {
     try {
