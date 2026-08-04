@@ -240,7 +240,7 @@ function outlineFor(shape: Shape): Pt[] {
   }
   if (shape === "honeycomb") {
     // zig-zag perimeter hugging every outer hexagon edge
-    return unionOutline(honeycombPolys(6)).map(([x, y]) => [x * 1.075, y * 1.075]);
+    return unionOutline(honeycombPolys(6)).map(([x, y]) => [x * 1.018, y * 1.018]);
   }
   const h = (Math.sqrt(3) / 2) * 10;
   const pts: Pt[] = [
@@ -498,7 +498,7 @@ function WaffleBaffle() {
       typeof window === "undefined" ? "" : `${window.location.origin}${window.location.pathname}`;
     const scores = locked ? dailyDone! : results;
     const lines = [
-      `Waffle Baffle #${puzzleNo} (${difficulty === 2 ? "Normal" : "Hard"})`,
+      `Waffle Baffle ${mode === "daily" ? `#${puzzleNo}` : "∞"} (${difficulty === 2 ? "Normal" : "Hard"})`,
       ...SHAPES.filter((s) => scores[s.id]).map((s) => {
         const r = scores[s.id]!;
         return `${s.label}: ${shortTime(r.seconds)} ${r.correct ? "✅" : "❌"}`;
@@ -507,7 +507,7 @@ function WaffleBaffle() {
       link,
     ];
     return lines.join("\n");
-  }, [puzzleNo, difficulty, results, locked, dailyDone]);
+  }, [puzzleNo, difficulty, results, locked, dailyDone, mode]);
 
 
   const share = async () => {
@@ -684,7 +684,7 @@ function WaffleBaffle() {
             {started && guess === null ? (
               <>
                 <p className="text-base font-bold text-foreground">
-                  Which topping is used more here?
+                  Which topping appears the most?
                 </p>
                 <div
                   className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
@@ -716,17 +716,20 @@ function WaffleBaffle() {
                   You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
                   {round.entries[round.winner]!.topping} covered more of the waffle.
                 </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold">
-                  {round.entries.map((e, i) => (
-                    <span key={i} className="flex items-center gap-2">
-                      <span
-                        className="inline-block size-3 rounded-full"
-                        style={{ backgroundColor: e.group.fill }}
-                      />
-                      {e.topping} · {e.count}
-                    </span>
-                  ))}
-                </div>
+                <ul className="mx-auto mt-4 flex w-fit flex-col gap-2 text-sm font-bold">
+                  {[...round.entries]
+                    .sort((a, b) => b.count - a.count)
+                    .map((e, i) => (
+                      <li key={i} className="flex items-center gap-3 text-left">
+                        <span
+                          className="inline-block size-3 shrink-0 rounded-full"
+                          style={{ backgroundColor: e.group.fill }}
+                        />
+                        <span className="flex-1">{e.topping}:</span>
+                        <span className="w-10 text-right tabular-nums">{e.count}</span>
+                      </li>
+                    ))}
+                </ul>
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                   {!allDone ? (
                     <Button className="rounded-full px-8 font-bold" onClick={nextWaffle}>

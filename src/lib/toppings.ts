@@ -92,7 +92,7 @@ export const COLOR_GROUPS: ColorGroup[] = [
       "Almond butter",
       "Toasted pecans",
       "Crushed walnuts",
-      "Vegan cookie butter",
+      "Cookie butter",
       "Date syrup",
       "Cinnamon",
     ],
