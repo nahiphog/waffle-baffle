@@ -30,7 +30,7 @@ function parseGameMode(value: unknown): GameMode {
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
-    mode: parseGameMode(search.mode),
+    mode: parseGameMode(search["mode"]),
   }),
   head: () => ({
     meta: [
