@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Calendar, Infinity as InfinityIcon, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,20 +12,39 @@ import {
 } from "@/components/ui/dialog";
 import { COLOR_GROUPS, type ColorGroup } from "@/lib/toppings";
 
+type GameMode = "classic" | "blitz" | "endurance";
+
+const GAME_MODES: { id: GameMode; label: string; directive: string }[] = [
+  { id: "classic", label: "Classic", directive: "Guess which topping appears most" },
+  {
+    id: "blitz",
+    label: "Blitz",
+    directive: "Answer within 5 seconds. The game continues until your first mistake",
+  },
+  { id: "endurance", label: "Endurance", directive: "Solve as many puzzles within 60 seconds" },
+];
+
+function parseGameMode(value: unknown): GameMode {
+  return value === "blitz" || value === "endurance" ? value : "classic";
+}
+
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    mode: parseGameMode(search["mode"]),
+  }),
   head: () => ({
     meta: [
       { title: "Waffle Baffle: Which Topping Covers More?" },
       {
         name: "description",
         content:
-          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Classic, Blitz and Endurance modes on square, triangle and honeycomb waffles.",
       },
       { property: "og:title", content: "Waffle Baffle: Which Topping Covers More?" },
       {
         property: "og:description",
         content:
-          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Square, triangle and honeycomb waffles, daily and unlimited modes.",
+          "Waffle Baffle is a quick perception puzzle: study the waffle and guess which topping covers more pieces. Classic, Blitz and Endurance modes on square, triangle and honeycomb waffles.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -40,12 +60,21 @@ type Cell = { points: string };
 type Entry = { group: ColorGroup; topping: string; count: number };
 type Round = { cells: number[]; entries: Entry[]; winner: number };
 type Result = { seconds: number; correct: boolean };
+type DailyRecord = {
+  results?: Partial<Record<Shape, Result>>;
+  streak?: number;
+  correct?: number;
+  wrong?: number;
+};
 
 const SHAPES: { id: Shape; label: string }[] = [
   { id: "square", label: "Square" },
   { id: "triangle", label: "Triangle" },
   { id: "honeycomb", label: "Honeycomb" },
 ];
+
+const BLITZ_MS = 5000;
+const ENDURANCE_MS = 60000;
 
 /* ---------- rng ---------- */
 
@@ -90,7 +119,6 @@ function prettyDate(key: string) {
     timeZone: "UTC",
   });
 }
-
 
 function msUntilMidnight() {
   const now = new Date();
@@ -239,7 +267,6 @@ function outlineFor(shape: Shape): Pt[] {
     ];
   }
   if (shape === "honeycomb") {
-    // zig-zag perimeter hugging every outer hexagon edge
     return unionOutline(honeycombPolys(6)).map(([x, y]) => [x * 1.018, y * 1.018]);
   }
   const h = (Math.sqrt(3) / 2) * 10;
@@ -304,26 +331,52 @@ function pickCounts(total: number, difficulty: Difficulty, rng: Rng): number[] {
     const sum = counts[0]! + counts[1]! + counts[2]!;
     if (sum !== total) continue;
     if (new Set(counts).size !== 3) continue;
+    const sorted = [...counts].sort((x, y) => x - y);
+    // largest must clear the runner-up by more than 3 pieces
+    if (sorted[2]! - sorted[1]! <= 3) continue;
     if (Math.max(...counts) - Math.min(...counts) > 4) return counts;
   }
   const base = Math.floor(total / 3);
-  return [base + 2, base, total - (base + 2) - base];
+  return [base + 5, base, total - (base + 5) - base];
+}
+
+const words = (t: string) => t.toLowerCase().split(/\s+/);
+
+/** Pick one topping per group so that no word is repeated across toppings. */
+function pickToppings(groups: ColorGroup[], rng: Rng): string[] | null {
+  const used = new Set<string>();
+  const out: string[] = [];
+  for (const g of groups) {
+    const options = g.toppings.filter((t) => words(t).every((w) => !used.has(w)));
+    if (options.length === 0) return null;
+    const topping = options[Math.floor(rng() * options.length)]!;
+    out.push(topping);
+    words(topping).forEach((w) => used.add(w));
+  }
+  return out;
 }
 
 function makeRound(total: number, difficulty: Difficulty, rng: Rng): Round {
-  const pool = [...COLOR_GROUPS];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = pool[i]!;
-    pool[i] = pool[j]!;
-    pool[j] = tmp;
+  let groups: ColorGroup[] = [];
+  let toppings: string[] | null = null;
+  for (let attempt = 0; attempt < 50 && !toppings; attempt++) {
+    const pool = [...COLOR_GROUPS];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = pool[i]!;
+      pool[i] = pool[j]!;
+      pool[j] = tmp;
+    }
+    groups = pool.slice(0, difficulty);
+    toppings = pickToppings(groups, rng);
   }
-  const groups = pool.slice(0, difficulty);
+  if (!toppings) toppings = groups.map((g) => g.toppings[0]!);
+
   const counts = pickCounts(total, difficulty, rng);
 
   const entries: Entry[] = groups.map((group, i) => ({
     group,
-    topping: group.toppings[Math.floor(rng() * group.toppings.length)]!,
+    topping: toppings![i]!,
     count: counts[i]!,
   }));
 
@@ -372,17 +425,22 @@ function NextDaily() {
     const id = window.setInterval(() => setMs(msUntilMidnight()), 1000);
     return () => window.clearInterval(id);
   }, []);
-  return (
-    <span className="font-display tabular-nums">{countdown(ms)}</span>
-  );
+  return <span className="font-display tabular-nums">{countdown(ms)}</span>;
 }
-
 
 /* ---------- component ---------- */
 
 function WaffleBaffle() {
-  const [shapeIdx, setShapeIdx] = useState(0);
+  const { mode: gameMode } = Route.useSearch();
+  const navigate = useNavigate({ from: "/" });
+  const setGameMode = (m: GameMode) =>
+    navigate({ search: { mode: m }, replace: true });
+
+  const [classicIdx, setClassicIdx] = useState(0);
+  const [roundIdx, setRoundIdx] = useState(0);
+  const shapeIdx = gameMode === "classic" ? classicIdx : roundIdx % SHAPES.length;
   const shape = SHAPES[shapeIdx]!.id;
+
   const [mode, setMode] = useState<Mode>("unlimited");
   const [difficulty, setDifficulty] = useState<Difficulty>(2);
   const [dark, setDark] = useState(true);
@@ -393,13 +451,20 @@ function WaffleBaffle() {
   const [started, setStarted] = useState(false);
   const [dayKey, setDayKey] = useState(todayKey());
   const [results, setResults] = useState<Partial<Record<Shape, Result>>>({});
+  const [streak, setStreak] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [wrongCount, setWrongCount] = useState(0);
+  const [over, setOver] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [unlimitedNo, setUnlimitedNo] = useState(1);
   const [copied, setCopied] = useState(false);
-  const [dailyDone, setDailyDone] = useState<Partial<Record<Shape, Result>> | null>(null);
+  const [dailyDone, setDailyDone] = useState<DailyRecord | null>(null);
 
   const startedAt = useRef<number>(0);
+  const runStartedAt = useRef<number>(0);
   const startedRef = useRef(false);
   const [elapsed, setElapsed] = useState(0);
+  const [runElapsed, setRunElapsed] = useState(0);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
@@ -410,21 +475,24 @@ function WaffleBaffle() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
-  // daily lock, persisted in the browser
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(`waffle-baffle-daily-${dayKey}`);
-      setDailyDone(raw ? (JSON.parse(raw) as Partial<Record<Shape, Result>>) : null);
+      const raw = window.localStorage.getItem(`waffle-baffle-daily-${dayKey}-${gameMode}`);
+      setDailyDone(raw ? (JSON.parse(raw) as DailyRecord) : null);
     } catch {
       setDailyDone(null);
     }
-  }, [dayKey]);
+  }, [dayKey, gameMode]);
 
   const seedFor = useCallback(
-    (s: Shape) =>
-      mode === "daily" ? `${dayKey}|${s}|${difficulty}` : `u${unlimitedNo}|${s}|${difficulty}|${dayKey}`,
-    [mode, dayKey, difficulty, unlimitedNo],
+    (s: Shape, idx: number) =>
+      mode === "daily"
+        ? `${dayKey}|${gameMode}|${s}|${idx}|${difficulty}`
+        : `u${unlimitedNo}|${gameMode}|${s}|${idx}|${difficulty}|${dayKey}`,
+    [mode, dayKey, difficulty, unlimitedNo, gameMode],
   );
+
+  const puzzleIdx = gameMode === "classic" ? classicIdx : roundIdx;
 
   // deal a fresh waffle whenever the board changes; keep the run going once started
   useEffect(() => {
@@ -437,23 +505,36 @@ function WaffleBaffle() {
     } else {
       setRunning(false);
     }
-    setRound(makeRound(cells.length, difficulty, mulberry32(hash(seedFor(shape)))));
-  }, [cells.length, shape, difficulty, seedFor]);
+    setRound(makeRound(cells.length, difficulty, mulberry32(hash(seedFor(shape, puzzleIdx)))));
+  }, [cells.length, shape, difficulty, seedFor, puzzleIdx]);
 
-  // a change of mode / level / day starts a fresh scorecard
-  useEffect(() => {
+  const resetRun = useCallback(() => {
     setResults({});
-    setShapeIdx(0);
+    setClassicIdx(0);
+    setRoundIdx(0);
+    setStreak(0);
+    setCorrectCount(0);
+    setWrongCount(0);
+    setOver(false);
+    setShowSummary(false);
     startedRef.current = false;
     setStarted(false);
     setRunning(false);
     setElapsed(0);
-  }, [mode, difficulty, dayKey]);
+    setRunElapsed(0);
+  }, []);
 
+  // a change of mode / level / day / game mode starts a fresh scorecard
+  useEffect(() => {
+    resetRun();
+  }, [mode, difficulty, dayKey, gameMode, resetRun]);
 
   useEffect(() => {
     if (!running) return;
-    const id = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 250);
+    const id = window.setInterval(() => {
+      setElapsed(Date.now() - startedAt.current);
+      setRunElapsed(Date.now() - runStartedAt.current);
+    }, 100);
     return () => window.clearInterval(id);
   }, [running]);
 
@@ -462,53 +543,149 @@ function WaffleBaffle() {
     return () => window.clearTimeout(id);
   }, [dayKey]);
 
+  const persistDaily = useCallback(
+    (record: DailyRecord) => {
+      if (mode !== "daily") return;
+      try {
+        window.localStorage.setItem(
+          `waffle-baffle-daily-${dayKey}-${gameMode}`,
+          JSON.stringify(record),
+        );
+      } catch {
+        /* storage unavailable */
+      }
+    },
+    [mode, dayKey, gameMode],
+  );
+
   const start = () => {
     startedAt.current = Date.now();
+    runStartedAt.current = Date.now();
     setElapsed(0);
+    setRunElapsed(0);
     setRunning(true);
     setStarted(true);
   };
 
+  const finishBlitz = useCallback(
+    (finalStreak: number) => {
+      setRunning(false);
+      setOver(true);
+      setShowSummary(true);
+      persistDaily({ streak: finalStreak });
+    },
+    [persistDaily],
+  );
+
+  const finishEndurance = useCallback(
+    (right: number, wrong: number) => {
+      setRunning(false);
+      setOver(true);
+      setShowSummary(true);
+      persistDaily({ correct: right, wrong });
+    },
+    [persistDaily],
+  );
+
+  // timed-mode expiry
+  useEffect(() => {
+    if (!running || over) return;
+    if (gameMode === "blitz" && elapsed >= BLITZ_MS) finishBlitz(streak);
+    if (gameMode === "endurance" && runElapsed >= ENDURANCE_MS)
+      finishEndurance(correctCount, wrongCount);
+  }, [
+    running,
+    over,
+    gameMode,
+    elapsed,
+    runElapsed,
+    streak,
+    correctCount,
+    wrongCount,
+    finishBlitz,
+    finishEndurance,
+  ]);
+
   const answer = (i: number) => {
-    if (!round || guess !== null || !started) return;
-    const ms = Date.now() - startedAt.current;
+    if (!round || !started || over) return;
     const correct = i === round.winner;
+
+    if (gameMode === "blitz") {
+      if (!correct) {
+        finishBlitz(streak);
+        return;
+      }
+      setStreak((s) => s + 1);
+      setRoundIdx((n) => n + 1);
+      return;
+    }
+
+    if (gameMode === "endurance") {
+      if (correct) setCorrectCount((c) => c + 1);
+      else setWrongCount((w) => w + 1);
+      setRoundIdx((n) => n + 1);
+      return;
+    }
+
+    if (guess !== null) return;
+    const ms = Date.now() - startedAt.current;
     setRunning(false);
     setElapsed(ms);
     setGuess(i);
     const next = { ...results, [shape]: { seconds: Math.floor(ms / 1000), correct } };
     setResults(next);
-    if (mode === "daily" && SHAPES.every((s) => next[s.id])) {
-      try {
-        window.localStorage.setItem(`waffle-baffle-daily-${dayKey}`, JSON.stringify(next));
-      } catch {
-        /* storage unavailable */
-      }
+    if (SHAPES.every((s) => next[s.id])) {
+      setShowSummary(true);
+      persistDaily({ results: next });
     }
   };
 
   const locked = mode === "daily" && dailyDone !== null;
   const isCorrect = guess !== null && round !== null && guess === round.winner;
   const puzzleNo = mode === "daily" ? dailyNumber(dayKey) : unlimitedNo;
-  const isLast = shapeIdx === SHAPES.length - 1;
   const allDone = SHAPES.every((s) => results[s.id]);
+  const modeInfo = GAME_MODES.find((m) => m.id === gameMode)!;
+
+  const record: DailyRecord = locked
+    ? dailyDone!
+    : { results, streak, correct: correctCount, wrong: wrongCount };
 
   const shareText = useMemo(() => {
     const link =
       typeof window === "undefined" ? "" : `${window.location.origin}${window.location.pathname}`;
-    const scores = locked ? dailyDone! : results;
-    const lines = [
-      `Waffle Baffle ${mode === "daily" ? `#${puzzleNo}` : "∞"} (${difficulty === 2 ? "Normal" : "Hard"})`,
+    const header = `Waffle Baffle ${mode === "daily" ? `#${puzzleNo}` : "∞"} (${
+      difficulty === 2 ? "Normal" : "Hard"
+    }, ${modeInfo.label})`;
+
+    if (gameMode === "blitz") {
+      const s = record.streak ?? 0;
+      return [
+        header,
+        `I won ${s} consecutive game${s === 1 ? "" : "s"}, each within 5 seconds.`,
+        "",
+        link,
+      ].join("\n");
+    }
+    if (gameMode === "endurance") {
+      const c = record.correct ?? 0;
+      return [
+        header,
+        `I won ${c} game${c === 1 ? "" : "s"} within 60 seconds.`,
+        "",
+        link,
+      ].join("\n");
+    }
+    const scores = record.results ?? {};
+    return [
+      header,
       ...SHAPES.filter((s) => scores[s.id]).map((s) => {
         const r = scores[s.id]!;
         return `${s.label}: ${shortTime(r.seconds)} ${r.correct ? "✅" : "❌"}`;
       }),
       "",
       link,
-    ];
-    return lines.join("\n");
-  }, [puzzleNo, difficulty, results, locked, dailyDone, mode]);
-
+    ].join("\n");
+  }, [puzzleNo, difficulty, mode, gameMode, modeInfo.label, record]);
 
   const share = async () => {
     try {
@@ -521,76 +698,129 @@ function WaffleBaffle() {
   };
 
   const nextWaffle = () => {
-    if (!isLast) setShapeIdx((i) => i + 1);
+    if (classicIdx < SHAPES.length - 1) setClassicIdx((i) => i + 1);
   };
 
   const playAgain = () => {
     setUnlimitedNo((n) => n + 1);
-    setResults({});
-    setShapeIdx(0);
-    startedRef.current = false;
-    setStarted(false);
-    setRunning(false);
-    setElapsed(0);
+    resetRun();
   };
 
+  const timerMs =
+    gameMode === "blitz"
+      ? Math.max(0, BLITZ_MS - elapsed)
+      : gameMode === "endurance"
+        ? Math.max(0, ENDURANCE_MS - runElapsed)
+        : elapsed;
+
+  const summaryBody = (
+    <div className="text-center">
+      {gameMode === "classic" && (
+        <ul className="mx-auto flex w-fit flex-col gap-2 text-sm font-bold">
+          {SHAPES.filter((s) => (record.results ?? {})[s.id]).map((s) => {
+            const r = (record.results ?? {})[s.id]!;
+            return (
+              <li key={s.id} className="flex items-center gap-4 text-left">
+                <span className="flex-1">{s.label}</span>
+                <span className="w-14 text-right tabular-nums">{shortTime(r.seconds)}</span>
+                <span>{r.correct ? "✅" : "❌"}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {gameMode === "blitz" && (
+        <p className="text-base font-bold text-foreground">
+          {record.streak ?? 0} consecutive win{(record.streak ?? 0) === 1 ? "" : "s"}, each
+          within 5 seconds.
+        </p>
+      )}
+      {gameMode === "endurance" && (
+        <p className="text-base font-bold text-foreground">
+          {record.correct ?? 0} correct · {record.wrong ?? 0} wrong in 60 seconds.
+        </p>
+      )}
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        <Button className="rounded-full px-8 font-bold" onClick={share}>
+          {copied ? "Copied!" : "Share"}
+        </Button>
+        {mode === "unlimited" && (
+          <Button variant="outline" className="rounded-full px-8 font-bold" onClick={playAgain}>
+            Play again
+          </Button>
+        )}
+      </div>
+      {mode === "daily" && (
+        <p className="mt-4 text-sm font-semibold text-muted-foreground">
+          Next daily waffle in <NextDaily />.
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-6 px-4 py-6">
-      <header className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-        <div className="flex items-center gap-2">
+      <header className="flex w-full flex-nowrap items-center justify-between gap-2 border-b border-border pb-4">
+        <div className="flex items-center gap-1">
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="rounded-full font-bold">
-                How to play
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full border-0"
+                aria-label="How to play"
+                title="How to play"
+              >
+                <Info className="size-5" />
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>How to play</DialogTitle>
                 <DialogDescription>
-                  Study the waffle and pick the topping that covers the most pieces. The
-                  shares are close, so trust your eyes — and the clock is running.
+                  Study the waffle and pick the topping that covers the most pieces. Classic
+                  serves three waffles with no time limit, Blitz gives you 5 seconds per waffle
+                  until your first mistake, and Endurance packs as many waffles as you can solve
+                  into 60 seconds.
                 </DialogDescription>
               </DialogHeader>
             </DialogContent>
           </Dialog>
 
           <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full text-lg leading-none font-bold"
+            variant="ghost"
+            size="icon"
+            className="rounded-full border-0"
             aria-label={mode === "daily" ? "Daily mode" : "Unlimited mode"}
             title={mode === "daily" ? "Daily mode" : "Unlimited mode"}
             onClick={() => setMode((m) => (m === "daily" ? "unlimited" : "daily"))}
           >
-            {mode === "daily" ? "🗓" : "∞"}
+            {mode === "daily" ? (
+              <Calendar className="size-5" />
+            ) : (
+              <InfinityIcon className="size-5" />
+            )}
           </Button>
         </div>
 
-        <div className="order-first w-full text-center sm:order-none sm:w-auto">
-          <h1 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
-            Waffle Baffle
-          </h1>
-          <p className="mt-1 text-sm font-semibold text-muted-foreground">
-            {mode === "daily" ? `#${puzzleNo}: ${prettyDate(dayKey)}` : "Unlimited mode"}
-          </p>
-        </div>
+        <h1 className="text-2xl font-black tracking-tight text-foreground sm:text-4xl">
+          Waffle Baffle
+        </h1>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="rounded-full font-bold"
+            className="rounded-full border-0 font-bold"
             aria-label={`Level: ${difficulty === 2 ? "Normal" : "Hard"}`}
             onClick={() => setDifficulty((d) => (d === 2 ? 3 : 2))}
           >
             {difficulty === 2 ? "Normal" : "Hard"}
           </Button>
           <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full text-lg leading-none font-bold"
+            variant="ghost"
+            size="icon"
+            className="rounded-full border-0 text-lg leading-none font-bold"
             aria-label="Toggle dark mode"
             onClick={() => setDark((v) => !v)}
           >
@@ -599,51 +829,70 @@ function WaffleBaffle() {
         </div>
       </header>
 
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+          {GAME_MODES.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setGameMode(m.id)}
+              className={`rounded-full px-4 py-1.5 text-sm font-bold transition-colors ${
+                m.id === gameMode
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-center text-sm font-semibold text-muted-foreground">
+          {modeInfo.directive}
+        </p>
+        <p className="text-center text-sm font-semibold text-muted-foreground">
+          {mode === "daily" ? `#${puzzleNo}: ${prettyDate(dayKey)}` : "Unlimited mode"}
+        </p>
+      </div>
+
       {locked ? (
         <section className="w-full max-w-xl rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
           <h2 className="text-2xl font-extrabold text-foreground">
-            Today's daily waffle is done
+            Today's daily {modeInfo.label.toLowerCase()} waffle is done
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             You've already served up daily #{puzzleNo}. Come back for a fresh plate.
           </p>
-          <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold text-foreground">
-            {SHAPES.filter((s) => dailyDone![s.id]).map((s) => {
-              const r = dailyDone![s.id]!;
-              return (
-                <span key={s.id}>
-                  {s.label}: {shortTime(r.seconds)} {r.correct ? "✅" : "❌"}
-                </span>
-              );
-            })}
-          </div>
-          <p className="mt-5 text-sm font-semibold text-muted-foreground">
-            Next daily waffle in <NextDaily />
-          </p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-            <Button className="rounded-full px-8 font-bold" onClick={share}>
-              {copied ? "Copied!" : "Share"}
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-full px-8 font-bold"
-              onClick={() => setMode("unlimited")}
-            >
-              Play unlimited
-            </Button>
-          </div>
+          <div className="mt-5">{summaryBody}</div>
+          <Button
+            variant="outline"
+            className="mt-4 rounded-full px-8 font-bold"
+            onClick={() => setMode("unlimited")}
+          >
+            Play unlimited
+          </Button>
         </section>
       ) : (
         <>
-          <div className="font-display text-2xl font-bold tabular-nums text-foreground">
-            {formatTime(elapsed)}
+          <div className="flex items-center gap-4">
+            <div className="font-display text-2xl font-bold tabular-nums text-foreground">
+              {formatTime(timerMs)}
+            </div>
+            {gameMode === "blitz" && (
+              <div className="font-display text-2xl font-bold text-foreground">✅ {streak}</div>
+            )}
+            {gameMode === "endurance" && (
+              <div className="font-display text-2xl font-bold text-foreground">
+                ✅ {correctCount} ❌ {wrongCount}
+              </div>
+            )}
           </div>
 
           <section className="relative w-full max-w-xl">
             <div className="waffle-plate p-3 sm:p-4">
               <svg
                 viewBox={viewBox}
-                className={`h-auto w-full transition-all duration-300 ${started ? "" : "blur-[28px]"}`}
+                className={`h-auto w-full transition-all duration-300 ${
+                  started && !over ? "" : "blur-[28px]"
+                }`}
                 role="img"
                 aria-label={`${shape} waffle with ${cells.length} pieces`}
               >
@@ -681,13 +930,15 @@ function WaffleBaffle() {
           </section>
 
           <section className="flex w-full max-w-xl flex-col items-center gap-4">
-            {started && guess === null ? (
+            {started && !over && guess === null ? (
               <>
                 <p className="text-base font-bold text-foreground">
                   Which topping appears the most?
                 </p>
                 <div
-                  className={`grid w-full gap-3 ${difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+                  className={`grid w-full gap-3 ${
+                    difficulty === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"
+                  }`}
                 >
                   {round?.entries.map((e, i) => (
                     <Button
@@ -707,10 +958,10 @@ function WaffleBaffle() {
               </>
             ) : null}
 
-            {guess !== null && round && (
+            {gameMode === "classic" && guess !== null && round && (
               <div className="w-full rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
                 <h2 className="text-2xl font-extrabold text-foreground">
-                  {isCorrect ? "Deliciously right!" : "Baffled!"}
+                  {isCorrect ? "Smooth as butter!" : "Butter luck next time!"}
                 </h2>
                 <p className="mt-2 text-sm text-muted-foreground">
                   You picked {round.entries[guess]!.topping} in {formatTime(elapsed)}.{" "}
@@ -736,35 +987,47 @@ function WaffleBaffle() {
                       Go to the next waffle
                     </Button>
                   ) : (
-                    <>
-                      <Button className="rounded-full px-8 font-bold" onClick={share}>
-                        {copied ? "Copied!" : "Share"}
-                      </Button>
-                      {mode === "unlimited" && (
-                        <Button
-                          variant="outline"
-                          className="rounded-full px-8 font-bold"
-                          onClick={playAgain}
-                        >
-                          Play again
-                        </Button>
-                      )}
-                    </>
+                    <Button
+                      className="rounded-full px-8 font-bold"
+                      onClick={() => setShowSummary(true)}
+                    >
+                      See your results
+                    </Button>
                   )}
                 </div>
-                {allDone && mode === "daily" && (
-                  <p className="mt-4 text-sm font-semibold text-muted-foreground">
-                    That's today's daily waffle — the next one is served in <NextDaily />.
-                    Switch to Unlimited to keep playing.
-                  </p>
-                )}
               </div>
+            )}
+
+            {over && gameMode !== "classic" && (
+              <Button
+                className="rounded-full px-8 font-bold"
+                onClick={() => setShowSummary(true)}
+              >
+                See your results
+              </Button>
             )}
           </section>
         </>
       )}
 
+      <Dialog open={showSummary} onOpenChange={setShowSummary}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {gameMode === "classic"
+                ? "Plate cleared!"
+                : gameMode === "blitz"
+                  ? "Blitz over!"
+                  : "Time's up!"}
+            </DialogTitle>
+            <DialogDescription>
+              Waffle Baffle {mode === "daily" ? `#${puzzleNo}` : "∞"} ·{" "}
+              {difficulty === 2 ? "Normal" : "Hard"} · {modeInfo.label}
+            </DialogDescription>
+          </DialogHeader>
+          {summaryBody}
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
-
