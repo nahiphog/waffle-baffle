@@ -320,8 +320,10 @@ function pickCounts(total: number, difficulty: Difficulty, rng: Rng): number[] {
     const lo = Math.ceil(total * 0.52);
     const hi = Math.floor(total * 0.56);
     const majority = lo + Math.floor(rng() * (hi - lo + 1));
-    return [majority, total - majority];
+    // randomise which option holds the majority
+    return rng() < 0.5 ? [majority, total - majority] : [total - majority, majority];
   }
+
   for (let guard = 0; guard < 5000; guard++) {
     let a = 0,
       b = 0,
