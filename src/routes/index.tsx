@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, Infinity as InfinityIcon, Info } from "lucide-react";
+import { Calendar, Infinity as InfinityIcon, Info, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
