@@ -300,12 +300,17 @@ function useGeometry(shape: Shape) {
       maxY = Math.max(maxY, y);
     }
     const pad = 0.6;
+    // every shape renders into an identically sized square region
+    const side = Math.max(maxX - minX, maxY - minY) + pad * 2;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
     return {
       cells,
       outline: toPoints(outline),
-      viewBox: `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`,
+      viewBox: `${cx - side / 2} ${cy - side / 2} ${side} ${side}`,
     };
   }, [shape]);
+
 }
 
 /* ---------- round generation ---------- */
