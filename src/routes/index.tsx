@@ -936,7 +936,7 @@ function WaffleBaffle() {
             <div className="waffle-plate p-3 sm:p-4">
               <svg
                 viewBox={viewBox}
-                className={`h-auto w-full transition-all duration-300 ${
+                className={`aspect-square w-full transition-all duration-300 ${
                   started && !over ? "" : "blur-[28px]"
                 }`}
                 role="img"
