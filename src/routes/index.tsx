@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, Infinity as InfinityIcon, Info } from "lucide-react";
+import { Calendar, Infinity as InfinityIcon, Info, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -300,12 +300,17 @@ function useGeometry(shape: Shape) {
       maxY = Math.max(maxY, y);
     }
     const pad = 0.6;
+    // every shape renders into an identically sized square region
+    const side = Math.max(maxX - minX, maxY - minY) + pad * 2;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
     return {
       cells,
       outline: toPoints(outline),
-      viewBox: `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`,
+      viewBox: `${cx - side / 2} ${cy - side / 2} ${side} ${side}`,
     };
   }, [shape]);
+
 }
 
 /* ---------- round generation ---------- */
@@ -315,8 +320,10 @@ function pickCounts(total: number, difficulty: Difficulty, rng: Rng): number[] {
     const lo = Math.ceil(total * 0.52);
     const hi = Math.floor(total * 0.56);
     const majority = lo + Math.floor(rng() * (hi - lo + 1));
-    return [majority, total - majority];
+    // randomise which option holds the majority
+    return rng() < 0.5 ? [majority, total - majority] : [total - majority, majority];
   }
+
   for (let guard = 0; guard < 5000; guard++) {
     let a = 0,
       b = 0,
@@ -760,8 +767,8 @@ function WaffleBaffle() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center gap-6 px-4 py-6">
-      <header className="flex w-full flex-nowrap items-center justify-between gap-2 border-b border-border pb-4">
-        <div className="flex items-center gap-1">
+      <header className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 border-b border-border pb-4">
+        <div className="flex items-center gap-1 justify-self-start">
           <Dialog>
             <DialogTrigger asChild>
               <Button
@@ -803,29 +810,70 @@ function WaffleBaffle() {
           </Button>
         </div>
 
-        <h1 className="text-2xl font-black tracking-tight text-foreground sm:text-4xl">
-          Waffle Baffle
-        </h1>
+        <div className="flex flex-col items-center">
+          <h1 className="text-2xl font-black tracking-tight text-foreground sm:text-4xl">
+            Waffle Baffle
+          </h1>
+          <p className="text-center text-sm font-semibold text-muted-foreground">
+            {mode === "daily" ? `#${puzzleNo}: ${prettyDate(dayKey)}` : "Unlimited mode"}
+          </p>
+        </div>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="rounded-full border-0 font-bold"
-            aria-label={`Level: ${difficulty === 2 ? "Normal" : "Hard"}`}
-            onClick={() => setDifficulty((d) => (d === 2 ? 3 : 2))}
-          >
-            {difficulty === 2 ? "Normal" : "Hard"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full border-0 text-lg leading-none font-bold"
-            aria-label="Toggle dark mode"
-            onClick={() => setDark((v) => !v)}
-          >
-            {dark ? "☼" : "☾"}
-          </Button>
+        <div className="flex items-center justify-self-end">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full border-0"
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings className="size-5" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Settings</DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-bold text-foreground">Difficulty</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full font-bold"
+                    onClick={() => setDifficulty((d) => (d === 2 ? 3 : 2))}
+                  >
+                    {difficulty === 2 ? "Normal" : "Hard"}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-bold text-foreground">Theme</span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full text-lg leading-none font-bold"
+                    aria-label="Toggle dark mode"
+                    onClick={() => setDark((v) => !v)}
+                  >
+                    {dark ? "☼" : "☾"}
+                  </Button>
+                </div>
+                <div className="border-t border-border pt-4 text-sm">
+                  <p className="font-bold text-foreground">See the other games I've made</p>
+                  <a
+                    href="https://yellowyellow.xyz/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-primary underline underline-offset-4"
+                  >
+                    Yellow Yellow
+                  </a>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </header>
 
@@ -848,10 +896,8 @@ function WaffleBaffle() {
         <p className="text-center text-sm font-semibold text-muted-foreground">
           {modeInfo.directive}
         </p>
-        <p className="text-center text-sm font-semibold text-muted-foreground">
-          {mode === "daily" ? `#${puzzleNo}: ${prettyDate(dayKey)}` : "Unlimited mode"}
-        </p>
       </div>
+
 
       {locked ? (
         <section className="w-full max-w-xl rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
@@ -890,7 +936,7 @@ function WaffleBaffle() {
             <div className="waffle-plate p-3 sm:p-4">
               <svg
                 viewBox={viewBox}
-                className={`h-auto w-full transition-all duration-300 ${
+                className={`aspect-square w-full transition-all duration-300 ${
                   started && !over ? "" : "blur-[28px]"
                 }`}
                 role="img"
